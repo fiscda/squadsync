@@ -4,8 +4,11 @@ import { revalidatePath } from "next/cache";
 import { redirect, unstable_rethrow } from "next/navigation";
 import {
   BackendError,
+  cancelEsemeny,
+  confirmIdopont,
   type EsemenyInput,
   proposeEsemeny,
+  reopenEgyeztetes,
   setVisszajelzes,
   type Valasz,
 } from "@/lib/backend";
@@ -169,4 +172,65 @@ export async function setVisszajelzesAction(
     throw err;
   }
   revalidatePath(`/esemenyek/${esemenyId}`);
+}
+
+/**
+ * Why a lifecycle change was refused, shown on the Esemény page as
+ * ?hiba=<value>.
+ */
+export type AllapotHiba = "szervezo" | "allapot";
+
+/**
+ * Runs one of the Szervező's lifecycle changes, then reloads the page
+ * without any earlier notice. A refusal (no longer the Szervező: 403, or
+ * the Esemény already changed: 409) reloads it with a notice saying why; a
+ * lost Tag goes back to the list.
+ */
+async function changeAllapot(
+  esemenyId: string,
+  change: (felhasznaloId: string) => Promise<void>,
+) {
+  const felhasznalo = await requireFelhasznalo();
+  try {
+    await change(felhasznalo.id);
+  } catch (err) {
+    unstable_rethrow(err);
+    if (err instanceof BackendError) {
+      if (err.status === 404) {
+        redirect("/csoportok");
+      }
+      if (err.status === 403 || err.status === 409) {
+        const hiba: AllapotHiba = err.status === 403 ? "szervezo" : "allapot";
+        revalidatePath(`/esemenyek/${esemenyId}`);
+        redirect(`/esemenyek/${esemenyId}?hiba=${hiba}`);
+      }
+    }
+    throw err;
+  }
+  revalidatePath(`/esemenyek/${esemenyId}`);
+  redirect(`/esemenyek/${esemenyId}`);
+}
+
+/** The Szervező confirms one Időpont: the Esemény becomes Véglegesítve. */
+export async function confirmIdopontAction(
+  esemenyId: string,
+  idopontId: string,
+) {
+  await changeAllapot(esemenyId, (felhasznaloId) =>
+    confirmIdopont(felhasznaloId, esemenyId, idopontId),
+  );
+}
+
+/** The Szervező reopens Egyeztetés, keeping every Visszajelzés. */
+export async function reopenEgyeztetesAction(esemenyId: string) {
+  await changeAllapot(esemenyId, (felhasznaloId) =>
+    reopenEgyeztetes(felhasznaloId, esemenyId),
+  );
+}
+
+/** The Szervező cancels the Esemény: it becomes Elmaradt, for good. */
+export async function cancelEsemenyAction(esemenyId: string) {
+  await changeAllapot(esemenyId, (felhasznaloId) =>
+    cancelEsemeny(felhasznaloId, esemenyId),
+  );
 }

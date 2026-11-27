@@ -73,12 +73,16 @@ func (a *App) esemenyMessage(ctx context.Context, q store.Queries, e domain.Esem
 			Talan:      allas.Talan,
 			Nem:        allas.Nem,
 			Helyezes:   int(allas.Helyezes),
-			Answerable: answerable(e, allas.Idopont),
+			Answerable: allas.Answerable,
+			Confirmed:  allas.Confirmed,
 		}
 		if line.Answerable {
 			answerableCount++
 		}
 		m.Idopontok[n] = line
+	}
+	for _, r := range d.Resztvevok {
+		m.Resztvevok = append(m.Resztvevok, r.Name)
 	}
 	linkable := discordLinkable(pageURL)
 	if linkable {

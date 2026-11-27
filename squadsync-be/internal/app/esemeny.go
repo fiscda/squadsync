@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"squadsync-be/internal/domain"
+	"squadsync-be/internal/gateway"
 	"squadsync-be/internal/store"
 )
 
@@ -38,9 +39,16 @@ const LocalDateLayout = "2006-01-02"
 var Budapest = mustLoadLocation("Europe/Budapest")
 
 // ErrIdopontNotAnswerable means the Idopont can't be answered in the
-// Esemeny's current state. For now every Idopont is answerable in
-// Egyeztetes and none otherwise.
+// Esemeny's current state (see answerable).
 var ErrIdopontNotAnswerable = errors.New("idopont is not answerable")
+
+// ErrNotSzervezo means the acting Felhasznalo is a Tag of the Esemeny's
+// Csoport but not its Szervezo, and the action is the Szervezo's alone.
+var ErrNotSzervezo = errors.New("not the szervezo of the esemeny")
+
+// ErrInvalidTransition means the Esemeny's state doesn't allow the change,
+// such as confirming an Elmaradt Esemeny.
+var ErrInvalidTransition = errors.New("invalid esemeny state transition")
 
 // ErrNonexistentLocalTime means a wall clock time that never happens in
 // Budapest, because the clocks jump forward over it (the spring DST change).
@@ -77,6 +85,13 @@ type EsemenyDetail struct {
 	SzervezoName string
 	// Idopontok are in chronological order.
 	Idopontok []IdopontAllas
+	// ConfirmedIdopont is the confirmed Idopont's id while the Esemeny has
+	// Resztvevok (Veglegesitve, Lezajlott), "" otherwise. Use it rather
+	// than the stored Esemeny.ConfirmedIdopontID.
+	ConfirmedIdopont string
+	// Resztvevok are ordered by name; empty unless the Esemeny is
+	// Veglegesitve or Lezajlott (see resztvevokOf).
+	Resztvevok []domain.Resztvevo
 }
 
 // IdopontAllas is an Idopont with how it stands: its counts and Helyezes
@@ -91,6 +106,11 @@ type IdopontAllas struct {
 	Sajat domain.Valasz
 	// Visszajelzesek are ordered by name.
 	Visszajelzesek []domain.VisszajelzesOfEsemeny
+	// Answerable tells whether it takes Visszajelzesek now (see answerable).
+	Answerable bool
+	// Confirmed marks the Esemeny's confirmed Idopont while it is
+	// Veglegesitve or Lezajlott (not once Elmaradt).
+	Confirmed bool
 }
 
 // ProposeEsemeny creates an Esemeny in the Csoport with its Idopontok. The
@@ -309,20 +329,29 @@ func esemenyDetail(ctx context.Context, q store.Queries, e domain.Esemeny, viewe
 	if err != nil {
 		return EsemenyDetail{}, err
 	}
+	confirmed, _ := confirmedIdopont(e)
 	return EsemenyDetail{
-		Esemeny:      e,
-		CsoportName:  csoport.Name,
-		SzervezoName: szervezo.Name,
-		Idopontok:    idopontAllasok(idopontok, visszajelzesek, viewerID),
+		Esemeny:          e,
+		CsoportName:      csoport.Name,
+		SzervezoName:     szervezo.Name,
+		Idopontok:        idopontAllasok(e, idopontok, visszajelzesek, viewerID),
+		ConfirmedIdopont: confirmed,
+		Resztvevok:       resztvevokOf(e, visszajelzesek),
 	}, nil
 }
 
 // idopontAllasok counts each Idopont's Visszajelzesek and ranks them.
-func idopontAllasok(idopontok []domain.Idopont, visszajelzesek []domain.VisszajelzesOfEsemeny, viewerID string) []IdopontAllas {
+func idopontAllasok(e domain.Esemeny, idopontok []domain.Idopont, visszajelzesek []domain.VisszajelzesOfEsemeny, viewerID string) []IdopontAllas {
 	out := make([]IdopontAllas, len(idopontok))
 	index := make(map[string]int, len(idopontok))
+	confirmed, ok := confirmedIdopont(e)
 	for n, i := range idopontok {
-		out[n] = IdopontAllas{Idopont: i, Visszajelzesek: []domain.VisszajelzesOfEsemeny{}}
+		out[n] = IdopontAllas{
+			Idopont:        i,
+			Visszajelzesek: []domain.VisszajelzesOfEsemeny{},
+			Answerable:     answerable(e, i),
+			Confirmed:      ok && i.ID == confirmed,
+		}
 		index[i.ID] = n
 	}
 	for _, v := range visszajelzesek {
@@ -363,12 +392,17 @@ func idopontAllasok(idopontok []domain.Idopont, visszajelzesek []domain.Visszaje
 // SetVisszajelzes records the Felhasznalo's answer to one Idopont of an
 // Esemeny, replacing any earlier answer. Only Tags of the Esemeny's Csoport
 // may answer; anyone else, and an Idopont of another Esemeny, gets
-// ErrNotFound. Answering is open while the Esemeny is in Egyeztetes;
-// otherwise it gives ErrIdopontNotAnswerable.
+// ErrNotFound. An Idopont that isn't answerable in the Esemeny's state
+// (see answerable) gives ErrIdopontNotAnswerable.
+//
+// A Resztvevo who drops from igen to talan or nem while the Esemeny is
+// Veglegesitve is reported to the Szervezo by DM.
 func (a *App) SetVisszajelzes(ctx context.Context, felhasznaloID, esemenyID, idopontID string, valasz domain.Valasz) error {
 	if !valasz.Valid() {
 		return fmt.Errorf("%w: a visszajelzes is igen, talan or nem", ErrInvalidInput)
 	}
+	var dropOut *gateway.DropOut
+	var szervezoID, csoportID string
 	err := a.store.InTx(ctx, func(q store.Queries) error {
 		e, err := requireEsemenyTag(ctx, q, esemenyID, felhasznaloID)
 		if err != nil {
@@ -384,26 +418,68 @@ func (a *App) SetVisszajelzes(ctx context.Context, felhasznaloID, esemenyID, ido
 		if !answerable(e, i) {
 			return ErrIdopontNotAnswerable
 		}
-		return q.UpsertVisszajelzes(ctx, domain.Visszajelzes{
+		before, err := q.FindValasz(ctx, i.ID, felhasznaloID)
+		if err != nil {
+			return err
+		}
+		if err := q.UpsertVisszajelzes(ctx, domain.Visszajelzes{
 			IdopontID:     i.ID,
 			FelhasznaloID: felhasznaloID,
 			Valasz:        valasz,
 			UpdatedAt:     a.clock.Now(),
-		})
+		}); err != nil {
+			return err
+		}
+		droppedOut := makesResztvevo(e, i, before) && !makesResztvevo(e, i, valasz)
+		if !droppedOut {
+			return nil
+		}
+		// #16 releases the drop-out's claims here, in this transaction, the
+		// Szervezo's own included, and #24 removes their calendar event.
+		// (Joining, for #24, is makesResztvevo(e, i, valasz) &&
+		// !makesResztvevo(e, i, before).)
+
+		// The Szervezo dropping out needs no DM to themselves.
+		if felhasznaloID != e.SzervezoID {
+			d, err := a.dropOut(ctx, q, e, felhasznaloID)
+			if err != nil {
+				return err
+			}
+			dropOut, szervezoID, csoportID = &d, e.SzervezoID, e.CsoportID
+		}
+		return nil
 	})
 	if err != nil {
 		return err
 	}
-	a.afterCommit(func(ctx context.Context) { a.refreshEsemenyMessages(ctx, esemenyID) })
+	a.afterCommit(func(ctx context.Context) {
+		a.refreshEsemenyMessages(ctx, esemenyID)
+		if dropOut != nil {
+			a.sendDropOutDM(ctx, csoportID, szervezoID, *dropOut)
+		}
+	})
 	return nil
 }
 
 // answerable tells whether the Idopont of the Esemeny takes Visszajelzesek
 // now. It is the one seam for this rule: SetVisszajelzes refuses the others,
-// and the Discord message shows answer buttons on exactly these. #8 changes
-// it so that after confirmation only the confirmed Idopont is answerable.
-func answerable(e domain.Esemeny, _ domain.Idopont) bool {
-	return e.Allapot == domain.Egyeztetes
+// the web shows answer buttons on exactly these (IdopontAllas.Answerable),
+// and so does the Discord message.
+//
+//   - Egyeztetes: every Idopont.
+//   - Veglegesitve: only the confirmed one, so late answers and drop-outs
+//     are still possible.
+//   - Elmaradt and Lezajlott: none.
+func answerable(e domain.Esemeny, i domain.Idopont) bool {
+	switch e.Allapot {
+	case domain.Egyeztetes:
+		return true
+	case domain.Veglegesitve:
+		confirmed, ok := confirmedIdopont(e)
+		return ok && i.ID == confirmed
+	default:
+		return false
+	}
 }
 
 // requireEsemenyTag returns the Esemeny if the Felhasznalo is a Tag of its
