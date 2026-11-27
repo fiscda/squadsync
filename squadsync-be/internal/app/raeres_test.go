@@ -385,3 +385,102 @@ func TestOwnRaeresHintOfAnIdopont(t *testing.T) {
 		t.Fatalf("own hints = %q, want %q", got, want)
 	}
 }
+
+// editedEsemenyek returns the ids of the Esemenyek whose message was edited
+// since the first n edits.
+func editedEsemenyek(h *apptest.Harness, n int) map[string]bool {
+	out := map[string]bool{}
+	for _, e := range h.Discord.Edits()[n:] {
+		out[e.Message.EsemenyID] = true
+	}
+	return out
+}
+
+func TestMarkingRaeresRefreshesTheMessagesOfEsemenyekOnThoseDays(t *testing.T) {
+	h := apptest.New(t)
+	ctx := context.Background()
+	a := csoportOf(t, h, "bela")
+	linkCsatorna(t, h, a.ID)
+	// Anna's second Csoport, one of Bela's own that Anna isn't in, and one
+	// of Anna's with a confirmed Esemeny.
+	anna2, err := h.App.CreateCsoport(ctx, "anna", "Túrázók")
+	if err != nil {
+		t.Fatalf("CreateCsoport: %v", err)
+	}
+	bela2, err := h.App.CreateCsoport(ctx, "bela", "Bélaék")
+	if err != nil {
+		t.Fatalf("CreateCsoport: %v", err)
+	}
+	anna3, err := h.App.CreateCsoport(ctx, "anna", "Régiek")
+	if err != nil {
+		t.Fatalf("CreateCsoport: %v", err)
+	}
+	for who, link := range map[string]app.LinkCsatornaInput{
+		"anna": {CsoportID: anna2.ID, GuildID: "guild-1", ChannelID: "chan-2"},
+		"bela": {CsoportID: bela2.ID, GuildID: "guild-1", ChannelID: "chan-3"},
+	} {
+		if _, err := h.App.LinkCsatorna(ctx, who, link); err != nil {
+			t.Fatalf("LinkCsatorna: %v", err)
+		}
+	}
+	if _, err := h.App.LinkCsatorna(ctx, "anna", app.LinkCsatornaInput{CsoportID: anna3.ID, GuildID: "guild-1", ChannelID: "chan-4"}); err != nil {
+		t.Fatalf("LinkCsatorna: %v", err)
+	}
+	dec1 := app.IdopontInput{Start: "2026-12-01T20:00", End: "2026-12-01T23:00"}
+	inA := esemenyWith(t, h, a.ID, dec1, app.IdopontInput{Start: "2026-12-20T20:00"})
+	inAnna2 := esemenyWith(t, h, anna2.ID, app.IdopontInput{Start: "2026-12-09", End: "2026-12-10", EgeszNapos: true})
+	if _, err := h.App.ProposeEsemeny(ctx, "bela", bela2.ID, app.EsemenyInput{Title: "Béla", Idopontok: []app.IdopontInput{dec1}}); err != nil {
+		t.Fatalf("ProposeEsemeny: %v", err)
+	}
+	confirmed := esemenyWith(t, h, anna3.ID, dec1)
+	if err := h.App.ConfirmIdopont(ctx, "anna", confirmed.ID, confirmed.Idopontok[0].ID); err != nil {
+		t.Fatalf("ConfirmIdopont: %v", err)
+	}
+
+	before := len(h.Discord.Edits())
+	mark(t, h, "anna", "2026-12-01", "2026-12-01", domain.Szabad)
+	// Only the Egyeztetes Esemeny of Anna's Csoport with an Idopont that
+	// day: not the other days' Esemeny, not Bela's other Csoport, and not
+	// the confirmed one.
+	if got, want := editedEsemenyek(h, before), map[string]bool{inA.ID: true}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("edited after marking 1 December = %v, want %v", got, want)
+	}
+
+	before = len(h.Discord.Edits())
+	mark(t, h, "anna", "2026-12-10", "2026-12-12", domain.Foglalt)
+	if got, want := editedEsemenyek(h, before), map[string]bool{inAnna2.ID: true}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("edited after marking 10 to 12 December = %v, want %v", got, want)
+	}
+
+	// A day with no Idopont, and a day touching an Idopont only at its end
+	// (the last Idopont of Anna's Túrázók ends at midnight of the 10th).
+	before = len(h.Discord.Edits())
+	mark(t, h, "anna", "2026-12-05", "2026-12-08", domain.Szabad)
+	if got := editedEsemenyek(h, before); len(got) != 0 {
+		t.Fatalf("edited after marking quiet days = %v, want none", got)
+	}
+}
+
+func TestSzabadAznapIsAbsentForDaysOutsideTheWindow(t *testing.T) {
+	h := apptest.New(t)
+	c := csoportOf(t, h, "bela")
+	// Today is 2 March 2026 and the window ends on 2 March 2027.
+	d := esemenyWith(t, h, c.ID,
+		app.IdopontInput{Start: "2026-02-20T20:00", End: "2026-02-21T22:00"},
+		app.IdopontInput{Start: "2026-03-01T20:00", End: "2026-03-02T00:00"}, // ended before today
+		app.IdopontInput{Start: "2026-03-01T20:00", End: "2026-03-02T09:00"}, // reaches into today
+		app.IdopontInput{Start: "2027-03-03T10:00"},                          // beyond the window
+		app.IdopontInput{Start: "2027-03-02T10:00"},                          // on its last day
+	)
+	list, err := h.App.EsemenyRaeres(context.Background(), "anna", d.ID)
+	if err != nil {
+		t.Fatalf("EsemenyRaeres: %v", err)
+	}
+	got := make([]bool, len(list))
+	for n, i := range list {
+		got[n] = i.NincsRaeres
+	}
+	if want := []bool{true, true, false, false, true}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("NincsRaeres = %v, want %v", got, want)
+	}
+}

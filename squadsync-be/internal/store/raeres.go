@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"squadsync-be/internal/domain"
 )
@@ -101,4 +102,36 @@ func (q Queries) CountTagsSzabadOnEveryDay(ctx context.Context, csoportID, from,
 		return 0, fmt.Errorf("count szabad on every day: %w", err)
 	}
 	return n, nil
+}
+
+// ListEgyeztetesEsemenyIDsOnDays returns the ids of the Esemenyek in
+// Egyeztetes, in the Csoportok the Felhasznalo is a Tag of, that have an
+// Idopont overlapping from..to (to exclusive). An Idopont with an end
+// covers [start, end); one without covers only its start.
+func (q Queries) ListEgyeztetesEsemenyIDsOnDays(ctx context.Context, felhasznaloID string, from, to time.Time) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx,
+		`SELECT DISTINCT e.id
+		 FROM esemeny e
+		 JOIN tag t ON t.csoport_id = e.csoport_id AND t.felhasznalo_id = ?
+		 JOIN idopont i ON i.esemeny_id = e.id
+		 WHERE e.allapot = 'egyeztetes'
+		   AND i.start_at < ?
+		   AND (CASE WHEN i.end_at IS NULL THEN i.start_at >= ? ELSE i.end_at > ? END)
+		 ORDER BY e.id`,
+		felhasznaloID, formatTime(to), formatTime(from), formatTime(from),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list esemenyek on days: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("list esemenyek on days: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }

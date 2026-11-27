@@ -543,6 +543,11 @@ export type IdopontRaeres = {
   /** Tags szabad on every day the Időpont covers, out of osszes Tags. */
   szabad: number;
   osszes: number;
+  /**
+   * None of the Időpont's days lies in the window (past or too far ahead),
+   * so show "–" instead of szabad/osszes.
+   */
+  nincsRaeres: boolean;
   /** The caller's own Ráérés over those days; null when unknown or mixed. */
   sajat: RaeresAllapot | null;
 };

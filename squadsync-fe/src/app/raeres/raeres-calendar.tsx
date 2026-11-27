@@ -92,9 +92,15 @@ export function RaeresCalendar({
       }
       if (result.error) {
         setError(result.error);
+        // Take back only the days still showing this failed change, so a
+        // later tap on the same day isn't undone with it.
+        const optimistic = allapot === "" ? undefined : allapot;
         setMarks((current) => {
           const next = { ...current };
           for (const day of days) {
+            if (current[day] !== optimistic) {
+              continue;
+            }
             if (before[day] === undefined) {
               delete next[day];
             } else {
@@ -133,7 +139,9 @@ export function RaeresCalendar({
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div
+      className={`flex flex-col gap-6 ${mode === "tartomany" ? "pb-40" : ""}`}
+    >
       <div className="flex flex-col gap-3">
         <fieldset className="flex gap-2">
           <legend className="sr-only">Jelölés módja</legend>
@@ -254,7 +262,7 @@ const swatchClass =
   "inline-flex size-6 items-center justify-center rounded-md text-xs";
 
 const dayClass: Record<RaeresAllapot | "ismeretlen", string> = {
-  szabad: "bg-green-600 text-white",
+  szabad: "bg-green-700 text-white",
   foglalt: "bg-red-600 text-white",
   ismeretlen: "bg-zinc-100 dark:bg-zinc-900",
 };

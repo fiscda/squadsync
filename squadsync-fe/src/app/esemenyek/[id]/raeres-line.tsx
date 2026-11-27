@@ -26,9 +26,12 @@ export async function IdopontRaeresLine({
   return (
     <div className="flex flex-col gap-1 text-sm">
       <p className="text-zinc-600 dark:text-zinc-400">
-        🗓 {raeres.szabad}/{raeres.osszes} szabad aznap
+        🗓{" "}
+        {raeres.nincsRaeres
+          ? "szabad aznap: –"
+          : `${raeres.szabad}/${raeres.osszes} szabad aznap`}
       </p>
-      {answerable && raeres.sajat !== null ? (
+      {answerable && !raeres.nincsRaeres && raeres.sajat !== null ? (
         <p
           className={
             raeres.sajat === "szabad"

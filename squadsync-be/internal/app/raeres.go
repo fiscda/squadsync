@@ -36,6 +36,9 @@ type IdopontRaeres struct {
 	// Szabad is how many Tags are szabad on every covered day, Osszes how
 	// many Tags the Csoport has.
 	Szabad, Osszes int
+	// NincsRaeres means none of the covered days lies in the window, so no
+	// Raeres can say anything about them: show "–", not "0/Y".
+	NincsRaeres bool
 	// Sajat is the viewer's own Raeres over the covered days: szabad if
 	// they are szabad on every one, foglalt if foglalt on any, otherwise
 	// "" (unknown or mixed).
@@ -58,7 +61,7 @@ func (a *App) SetRaeres(ctx context.Context, felhasznaloID, from, to string, all
 	if first.Before(windowFrom) || last.After(windowTo) {
 		return fmt.Errorf("%w: only days from %s to %s can be marked", ErrInvalidInput, formatDay(windowFrom), formatDay(windowTo))
 	}
-	return a.store.InTx(ctx, func(q store.Queries) error {
+	err = a.store.InTx(ctx, func(q store.Queries) error {
 		if err := requireFelhasznalo(ctx, q, felhasznaloID); err != nil {
 			return err
 		}
@@ -72,6 +75,28 @@ func (a *App) SetRaeres(ctx context.Context, felhasznaloID, from, to string, all
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	a.afterCommit(func(ctx context.Context) { a.refreshEsemenyMessagesOnDays(ctx, felhasznaloID, first, last) })
+	return nil
+}
+
+// refreshEsemenyMessagesOnDays edits the Discord messages whose "X/Y szabad
+// aznap" the Felhasznalo's change of first..last may have changed: those of
+// the Esemenyek in Egyeztetes, in their Csoportok, with an Idopont on those
+// days. It is a job, so it calls no use case.
+func (a *App) refreshEsemenyMessagesOnDays(ctx context.Context, felhasznaloID string, first, last time.Time) {
+	from := time.Date(first.Year(), first.Month(), first.Day(), 0, 0, 0, 0, Budapest)
+	to := time.Date(last.Year(), last.Month(), last.Day()+1, 0, 0, 0, 0, Budapest)
+	ids, err := a.store.ListEgyeztetesEsemenyIDsOnDays(ctx, felhasznaloID, from, to)
+	if err != nil {
+		a.log.Error("refresh esemeny messages after raeres", "felhasznalo", felhasznaloID, "err", err)
+		return
+	}
+	for _, id := range ids {
+		a.refreshEsemenyMessages(ctx, id)
+	}
 }
 
 // Raeres returns the Felhasznalo's own marked days from..to (Budapest dates,
@@ -140,53 +165,88 @@ func (a *App) EsemenyRaeres(ctx context.Context, felhasznaloID, esemenyID string
 	if err != nil {
 		return nil, err
 	}
-	out := make([]IdopontRaeres, len(idopontok))
-	for n, i := range idopontok {
-		szabad, osszes, err := szabadAznap(ctx, q, e.CsoportID, i)
+	out, err := a.idopontRaeres(ctx, q, e.CsoportID, idopontok)
+	if err != nil {
+		return nil, err
+	}
+	// The viewer's own Raeres, read once for all the Idopontok's days.
+	if len(idopontok) > 0 {
+		first, last := idopontokDays(idopontok)
+		own, err := q.ListRaeres(ctx, felhasznaloID, formatDay(first), formatDay(last))
 		if err != nil {
 			return nil, err
 		}
-		sajat, err := sajatRaeres(ctx, q, felhasznaloID, i)
-		if err != nil {
-			return nil, err
+		marks := make(map[string]domain.RaeresAllapot, len(own))
+		for _, d := range own {
+			marks[d.Day] = d.Allapot
 		}
-		out[n] = IdopontRaeres{IdopontID: i.ID, Szabad: szabad, Osszes: osszes, Sajat: sajat}
+		for n, i := range idopontok {
+			out[n].Sajat = sajatRaeres(marks, i)
+		}
 	}
 	return out, nil
 }
 
-// szabadAznap counts the Csoport's Tags who are szabad on every day the
-// Idopont covers, and the Tags in all.
-func szabadAznap(ctx context.Context, q store.Queries, csoportID string, i domain.Idopont) (szabad, osszes int, err error) {
-	if osszes, err = q.CountTags(ctx, csoportID); err != nil {
-		return 0, 0, err
+// idopontRaeres counts, for each Idopont, the Csoport's Tags szabad on every
+// day it covers (Sajat is left for the caller). The Tags are counted once.
+func (a *App) idopontRaeres(ctx context.Context, q store.Queries, csoportID string, idopontok []domain.Idopont) ([]IdopontRaeres, error) {
+	out := make([]IdopontRaeres, len(idopontok))
+	if len(idopontok) == 0 {
+		return out, nil
 	}
-	first, last := idopontDays(i)
-	szabad, err = q.CountTagsSzabadOnEveryDay(ctx, csoportID, formatDay(first), formatDay(last), dayCount(first, last))
-	return szabad, osszes, err
+	osszes, err := q.CountTags(ctx, csoportID)
+	if err != nil {
+		return nil, err
+	}
+	windowFrom, windowTo := a.raeresWindow()
+	for n, i := range idopontok {
+		first, last := idopontDays(i)
+		out[n] = IdopontRaeres{IdopontID: i.ID, Osszes: osszes}
+		if last.Before(windowFrom) || first.After(windowTo) {
+			out[n].NincsRaeres = true
+			continue
+		}
+		out[n].Szabad, err = q.CountTagsSzabadOnEveryDay(ctx, csoportID, formatDay(first), formatDay(last), dayCount(first, last))
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
-// sajatRaeres summarises the Felhasznalo's own Raeres over the days the
-// Idopont covers.
-func sajatRaeres(ctx context.Context, q store.Queries, felhasznaloID string, i domain.Idopont) (domain.RaeresAllapot, error) {
+// sajatRaeres summarises the viewer's own marks over the days the Idopont
+// covers.
+func sajatRaeres(marks map[string]domain.RaeresAllapot, i domain.Idopont) domain.RaeresAllapot {
 	first, last := idopontDays(i)
-	days, err := q.ListRaeres(ctx, felhasznaloID, formatDay(first), formatDay(last))
-	if err != nil {
-		return "", err
-	}
 	szabad := 0
-	for _, d := range days {
-		switch d.Allapot {
+	for d := first; !d.After(last); d = d.AddDate(0, 0, 1) {
+		switch marks[formatDay(d)] {
 		case domain.Foglalt:
-			return domain.Foglalt, nil
+			return domain.Foglalt
 		case domain.Szabad:
 			szabad++
 		}
 	}
 	if szabad == dayCount(first, last) {
-		return domain.Szabad, nil
+		return domain.Szabad
 	}
-	return "", nil
+	return ""
+}
+
+// idopontokDays is the earliest first day and the latest last day of the
+// Idopontok, which must not be empty.
+func idopontokDays(idopontok []domain.Idopont) (first, last time.Time) {
+	first, last = idopontDays(idopontok[0])
+	for _, i := range idopontok[1:] {
+		f, l := idopontDays(i)
+		if f.Before(first) {
+			first = f
+		}
+		if l.After(last) {
+			last = l
+		}
+	}
+	return first, last
 }
 
 // idopontDays is the first and last Budapest day the Idopont covers. A

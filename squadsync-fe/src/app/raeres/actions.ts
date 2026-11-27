@@ -1,6 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { BackendError, type RaeresAllapot, setRaeres } from "@/lib/backend";
 import { requireFelhasznalo } from "@/lib/felhasznalo";
@@ -40,6 +39,5 @@ export async function setRaeresAction(
     }
     throw err;
   }
-  revalidatePath("/raeres");
   return {};
 }

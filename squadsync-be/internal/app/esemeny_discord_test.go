@@ -327,13 +327,10 @@ func TestEsemenyMessageShowsHowManyTagsAreSzabadOnTheIdopontDays(t *testing.T) {
 		t.Fatalf("posted lines = %+v, want 2/3 and 1/3", lines)
 	}
 
-	// Raeres changes don't edit the message by themselves; the next change
-	// to the Esemeny shows the new counts.
+	// A change of Raeres edits the message, so the counts stay current.
 	mark(t, h, "cecil", "2026-12-01", "2026-12-01", domain.Szabad)
-	d := detail(t, h, "bela", e.ID)
-	answer(t, h, "bela", d, 0, domain.Igen)
 	edits := h.Discord.Edits()
-	if len(edits) != 1 || edits[0].Message.Idopontok[0].Szabad != 3 || edits[0].Message.Idopontok[0].Osszes != 3 {
+	if len(edits) != 1 || edits[0].Message.EsemenyID != e.ID || edits[0].Message.Idopontok[0].Szabad != 3 || edits[0].Message.Idopontok[0].Osszes != 3 {
 		t.Fatalf("edits = %+v, want the first Idopont at 3/3", edits)
 	}
 }

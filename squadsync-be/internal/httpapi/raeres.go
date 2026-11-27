@@ -35,6 +35,9 @@ type idopontRaeresJSON struct {
 	IdopontID string `json:"idopontId"`
 	Szabad    int    `json:"szabad"`
 	Osszes    int    `json:"osszes"`
+	// NincsRaeres: none of the days can have a Raeres (past or beyond the
+	// window), so show "–" instead of the counts.
+	NincsRaeres bool `json:"nincsRaeres"`
 	// Sajat is the caller's own Raeres over the covered days: "szabad",
 	// "foglalt", or null when unknown or mixed.
 	Sajat *string `json:"sajat"`
@@ -96,7 +99,7 @@ func (s *server) getEsemenyRaeres(w http.ResponseWriter, r *http.Request, felhas
 	}
 	out := make([]idopontRaeresJSON, 0, len(list))
 	for _, i := range list {
-		j := idopontRaeresJSON{IdopontID: i.IdopontID, Szabad: i.Szabad, Osszes: i.Osszes}
+		j := idopontRaeresJSON{IdopontID: i.IdopontID, Szabad: i.Szabad, Osszes: i.Osszes, NincsRaeres: i.NincsRaeres}
 		if i.Sajat != "" {
 			v := string(i.Sajat)
 			j.Sajat = &v
