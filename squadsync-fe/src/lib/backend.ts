@@ -20,6 +20,8 @@ export class BackendError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** Go's machine-readable reason for some errors, e.g. "last_admin"; "" otherwise. */
+    readonly code: string = "",
   ) {
     super(message);
     this.name = "BackendError";
@@ -29,6 +31,16 @@ export class BackendError extends Error {
 function backendUrl(path: string): string {
   const port = process.env.BACKEND_PORT || "8081";
   return `http://127.0.0.1:${port}${path}`;
+}
+
+/** The "code" of a Go error body like {"error":"…","code":"last_admin"}, or "". */
+function errorCode(body: string): string {
+  try {
+    const code = (JSON.parse(body) as { code?: unknown }).code;
+    return typeof code === "string" ? code : "";
+  } catch {
+    return "";
+  }
 }
 
 /**
@@ -66,6 +78,7 @@ async function callBackend<T>(
     throw new BackendError(
       res.status,
       `${method} ${path} failed with ${res.status}: ${text}`,
+      errorCode(text),
     );
   }
   if (res.status === 204) {
@@ -230,6 +243,8 @@ export type Tag = {
 export type CsoportDetail = Csoport & {
   /** Whether the caller is an Admin of the Csoport. */
   admin: boolean;
+  /** Whether the caller muted the DMs of this Csoport. */
+  muted: boolean;
   /** Admins first, then in the order they joined. */
   tags: Tag[];
   /** The linked Discord channel, or null. */
@@ -332,6 +347,80 @@ export async function unlinkCsatorna(
     felhasznaloId,
     "DELETE",
     `/csoport/${encodeURIComponent(csoportId)}/csatorna`,
+  );
+}
+
+/** Renames the Csoport. Admins only (403); 400 for an invalid name. */
+export function renameCsoport(
+  felhasznaloId: string,
+  csoportId: string,
+  name: string,
+): Promise<Csoport> {
+  return callBackend(
+    felhasznaloId,
+    "PUT",
+    `/csoport/${encodeURIComponent(csoportId)}/name`,
+    { name },
+  );
+}
+
+/**
+ * Grants or revokes another Tag's Admin role. Admins only (403). Go answers
+ * 409 with code "last_admin" when the last Admin would drop the role.
+ */
+export async function setTagAdmin(
+  felhasznaloId: string,
+  csoportId: string,
+  targetId: string,
+  admin: boolean,
+): Promise<void> {
+  await callBackend<void>(
+    felhasznaloId,
+    "PUT",
+    `/csoport/${encodeURIComponent(csoportId)}/tag/${encodeURIComponent(targetId)}/admin`,
+    { admin },
+  );
+}
+
+/**
+ * Removes a Tag. Admins only (403). Go answers 409 with code "last_admin" or
+ * "szervezo_of_active_esemeny".
+ */
+export async function removeTag(
+  felhasznaloId: string,
+  csoportId: string,
+  targetId: string,
+): Promise<void> {
+  await callBackend<void>(
+    felhasznaloId,
+    "DELETE",
+    `/csoport/${encodeURIComponent(csoportId)}/tag/${encodeURIComponent(targetId)}`,
+  );
+}
+
+/** The caller leaves the Csoport. Go answers 409 like removeTag does. */
+export async function leaveCsoport(
+  felhasznaloId: string,
+  csoportId: string,
+): Promise<void> {
+  await callBackend<void>(
+    felhasznaloId,
+    "POST",
+    `/csoport/${encodeURIComponent(csoportId)}/kilepes`,
+  );
+}
+
+/** Mutes or unmutes the caller's DMs from the Csoport. */
+export async function setCsoportMuted(
+  felhasznaloId: string,
+  csoportId: string,
+  muted: boolean,
+): Promise<void> {
+  await callBackend<void>(
+    felhasznaloId,
+    "PUT",
+    `/csoport/${encodeURIComponent(csoportId)}/nemitas`,
+    { muted },
   );
 }
 
