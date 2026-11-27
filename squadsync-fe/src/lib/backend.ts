@@ -347,6 +347,11 @@ export type Esemeny = {
   helyszin: Helyszin;
   szervezoId: string;
   allapot: Allapot;
+  /**
+   * The confirmed Időpont: set in Véglegesítve and Lezajlott, kept when a
+   * Véglegesítve Esemény became Elmaradt, null otherwise.
+   */
+  confirmedIdopontId: string | null;
   /** RFC 3339, UTC */
   createdAt: string;
 };
@@ -389,6 +394,20 @@ export type Idopont = {
   sajat: Valasz | null;
   /** Ordered by name. */
   visszajelzesek: VisszajelzesOfEsemeny[];
+  /**
+   * Whether it takes Visszajelzések now: every Időpont in Egyeztetés, only
+   * the confirmed one in Véglegesítve, none otherwise.
+   */
+  answerable: boolean;
+  /** The confirmed Időpont of a Véglegesítve or Lezajlott Esemény. */
+  confirmed: boolean;
+};
+
+/** Someone with igen on the confirmed Időpont. */
+export type Resztvevo = {
+  felhasznaloId: string;
+  name: string;
+  isTag: boolean;
 };
 
 export type EsemenyDetail = Esemeny & {
@@ -396,6 +415,8 @@ export type EsemenyDetail = Esemeny & {
   szervezoName: string;
   /** In chronological order. */
   idopontok: Idopont[];
+  /** Ordered by name; empty unless Véglegesítve or Lezajlott. */
+  resztvevok: Resztvevo[];
 };
 
 export type EsemenyInput = {
@@ -462,5 +483,52 @@ export async function setVisszajelzes(
     "PUT",
     `/esemeny/${encodeURIComponent(esemenyId)}/idopont/${encodeURIComponent(idopontId)}/visszajelzes`,
     { valasz },
+  );
+}
+
+/**
+ * The Szervező confirms one Időpont of an Esemény in Egyeztetés. Fails with
+ * 403 for anyone else and 409 in any other state.
+ */
+export async function confirmIdopont(
+  felhasznaloId: string,
+  esemenyId: string,
+  idopontId: string,
+): Promise<void> {
+  await callBackend<void>(
+    felhasznaloId,
+    "POST",
+    `/esemeny/${encodeURIComponent(esemenyId)}/veglegesites`,
+    { idopontId },
+  );
+}
+
+/**
+ * The Szervező takes a Véglegesítve Esemény back to Egyeztetés, keeping every
+ * Visszajelzés. Fails with 403 for anyone else and 409 in any other state.
+ */
+export async function reopenEgyeztetes(
+  felhasznaloId: string,
+  esemenyId: string,
+): Promise<void> {
+  await callBackend<void>(
+    felhasznaloId,
+    "POST",
+    `/esemeny/${encodeURIComponent(esemenyId)}/ujranyitas`,
+  );
+}
+
+/**
+ * The Szervező cancels an Esemény in Egyeztetés or Véglegesítve: it becomes
+ * Elmaradt, for good. Fails with 403 for anyone else and 409 otherwise.
+ */
+export async function cancelEsemeny(
+  felhasznaloId: string,
+  esemenyId: string,
+): Promise<void> {
+  await callBackend<void>(
+    felhasznaloId,
+    "POST",
+    `/esemeny/${encodeURIComponent(esemenyId)}/lemondas`,
   );
 }

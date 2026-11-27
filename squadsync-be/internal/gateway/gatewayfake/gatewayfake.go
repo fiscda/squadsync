@@ -22,6 +22,16 @@ type DM struct {
 	Esemeny *gateway.EsemenyMessage
 	// Ref is the sent message, set only when Esemeny is.
 	Ref gateway.MessageRef
+	// Announcement is set for an announcement sent by DM.
+	Announcement *gateway.Announcement
+	// DropOut is set for a drop-out DM to the Szervezo.
+	DropOut *gateway.DropOut
+}
+
+// AnnouncementPost is one announcement posted in a channel.
+type AnnouncementPost struct {
+	Ref          gateway.MessageRef
+	Announcement gateway.Announcement
 }
 
 // Post is one Esemeny message posted in a channel.
@@ -46,6 +56,8 @@ type Discord struct {
 	dms   []DM
 	posts []Post
 	edits []Edit
+
+	announcements []AnnouncementPost
 }
 
 var _ gateway.DiscordMessenger = (*Discord)(nil)
@@ -118,6 +130,47 @@ func (d *Discord) EditEsemenyMessage(_ context.Context, ref gateway.MessageRef, 
 	}
 	d.edits = append(d.edits, Edit{Ref: ref, Message: m})
 	return nil
+}
+
+// PostAnnouncement records the post.
+func (d *Discord) PostAnnouncement(_ context.Context, channelID string, a gateway.Announcement) (gateway.MessageRef, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.fail != nil {
+		return gateway.MessageRef{}, d.fail
+	}
+	ref := d.newRef(channelID)
+	d.announcements = append(d.announcements, AnnouncementPost{Ref: ref, Announcement: a})
+	return ref, nil
+}
+
+// SendAnnouncementDM records the message.
+func (d *Discord) SendAnnouncementDM(_ context.Context, discordID string, a gateway.Announcement) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.fail != nil {
+		return d.fail
+	}
+	d.dms = append(d.dms, DM{DiscordID: discordID, Announcement: &a})
+	return nil
+}
+
+// SendDropOutDM records the message.
+func (d *Discord) SendDropOutDM(_ context.Context, discordID string, o gateway.DropOut) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.fail != nil {
+		return d.fail
+	}
+	d.dms = append(d.dms, DM{DiscordID: discordID, DropOut: &o})
+	return nil
+}
+
+// Announcements returns every announcement posted in a channel, in order.
+func (d *Discord) Announcements() []AnnouncementPost {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]AnnouncementPost(nil), d.announcements...)
 }
 
 // DMs returns every direct message sent so far, in order.

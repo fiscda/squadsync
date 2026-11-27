@@ -46,10 +46,22 @@ const (
 	webLinkFormat     = "\nWeboldal: %s"
 )
 
+// Text of an announcement and of a drop-out DM.
+const (
+	announcementFormat = "%s: **%s**"
+	csoportFormat      = " (%s)"
+	detailFormat       = " – %s"
+	linkFormat         = "\n%s"
+	dropOutFormat      = "%s már nem jön: **%s**"
+)
+
 // Layout of the Esemeny's message.
 const (
 	webButtonLabel    = "Válaszolj a weboldalon"
 	noVisszajelzesYet = "Még senki nem válaszolt."
+	confirmedMark     = "✅ "
+	resztvevokName    = "Résztvevők (%d)"
+	noResztvevo       = "Még senki."
 	helyszinMapsOnly  = "Térkép"
 	numberSeparator   = " · "
 	embedColor        = 0x5865F2
@@ -108,6 +120,32 @@ func voteRequestText(r gateway.VoteRequest) string {
 	return s
 }
 
+// announcementText words an announcement. In a DM it names the Csoport
+// too, which the Csatorna makes obvious.
+func announcementText(a gateway.Announcement, inDM bool) string {
+	s := fmt.Sprintf(announcementFormat, a.Headline, escapeMarkdown(a.Title))
+	if inDM {
+		s += fmt.Sprintf(csoportFormat, escapeMarkdown(a.CsoportName))
+	}
+	if a.Detail != "" {
+		s += fmt.Sprintf(detailFormat, a.Detail)
+	}
+	if a.Link != "" {
+		s += fmt.Sprintf(linkFormat, a.Link)
+	}
+	return s
+}
+
+// dropOutText words the Szervezo's drop-out DM. #16 adds what was freed.
+func dropOutText(d gateway.DropOut) string {
+	s := fmt.Sprintf(dropOutFormat, escapeMarkdown(d.Name), escapeMarkdown(d.Title))
+	s += fmt.Sprintf(csoportFormat, escapeMarkdown(d.CsoportName))
+	if d.Link != "" {
+		s += fmt.Sprintf(linkFormat, d.Link)
+	}
+	return s
+}
+
 // renderEsemeny lays out an Esemeny's message. Components is never nil, so
 // an edit that leaves no buttons removes the old ones.
 func renderEsemeny(m gateway.EsemenyMessage) ([]*discordgo.MessageEmbed, []discordgo.MessageComponent, error) {
@@ -126,10 +164,22 @@ func renderEsemeny(m gateway.EsemenyMessage) ([]*discordgo.MessageEmbed, []disco
 	if h := helyszin(m); h != "" {
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Helyszín", Value: h, Inline: true})
 	}
+	confirmed := false
 	for n, i := range m.Idopontok {
+		name := fmt.Sprintf("%d%s%s", n+1, numberSeparator, i.Label)
+		if i.Confirmed {
+			name = confirmedMark + name
+			confirmed = true
+		}
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-			Name:  truncate(fmt.Sprintf("%d%s%s", n+1, numberSeparator, i.Label), maxEmbedFieldNameLength),
+			Name:  truncate(name, maxEmbedFieldNameLength),
 			Value: allas(i),
+		})
+	}
+	if confirmed {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:  fmt.Sprintf(resztvevokName, len(m.Resztvevok)),
+			Value: resztvevok(m.Resztvevok),
 		})
 	}
 	if m.Note != "" {
@@ -183,6 +233,18 @@ func helyszin(m gateway.EsemenyMessage) string {
 		return link
 	}
 	return field(m.HelyszinName, maxEmbedFieldValueLength)
+}
+
+// resztvevok lists the Resztvevok' names, cut to fit a field.
+func resztvevok(names []string) string {
+	if len(names) == 0 {
+		return noResztvevo
+	}
+	escaped := make([]string, len(names))
+	for n, name := range names {
+		escaped[n] = escapeMarkdown(name)
+	}
+	return truncate(strings.Join(escaped, ", "), maxEmbedFieldValueLength)
 }
 
 // allas shows an Idopont's counts and Helyezes.
@@ -244,6 +306,30 @@ func deferredUpdate() Reply {
 // SendVoteRequestDM implements gateway.DiscordMessenger.
 func (m Messenger) SendVoteRequestDM(ctx context.Context, discordID string, r gateway.VoteRequest) error {
 	return m.SendDM(ctx, discordID, voteRequestText(r))
+}
+
+// PostAnnouncement implements gateway.DiscordMessenger.
+func (m Messenger) PostAnnouncement(ctx context.Context, channelID string, a gateway.Announcement) (gateway.MessageRef, error) {
+	sent, err := m.Session.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
+		Content:         announcementText(a, false),
+		AllowedMentions: &discordgo.MessageAllowedMentions{},
+		// The link is for clicking, not for a preview card.
+		Flags: discordgo.MessageFlagsSuppressEmbeds,
+	}, discordgo.WithContext(ctx))
+	if err != nil {
+		return gateway.MessageRef{}, fmt.Errorf("post announcement: %w", err)
+	}
+	return gateway.MessageRef{ChannelID: sent.ChannelID, MessageID: sent.ID}, nil
+}
+
+// SendAnnouncementDM implements gateway.DiscordMessenger.
+func (m Messenger) SendAnnouncementDM(ctx context.Context, discordID string, a gateway.Announcement) error {
+	return m.SendDM(ctx, discordID, announcementText(a, true))
+}
+
+// SendDropOutDM implements gateway.DiscordMessenger.
+func (m Messenger) SendDropOutDM(ctx context.Context, discordID string, d gateway.DropOut) error {
+	return m.SendDM(ctx, discordID, dropOutText(d))
 }
 
 // PostEsemenyMessage implements gateway.DiscordMessenger.

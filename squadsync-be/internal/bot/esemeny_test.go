@@ -121,3 +121,41 @@ func TestAnswerButtonWithAMalformedCustomIDIsRefused(t *testing.T) {
 	resp := w.router.Route(context.Background(), answerButton(t, "d-bela", d.ID, d.Idopontok[0].ID, "lehet")).Response
 	expectEphemeral(t, resp, "Ezt nem ismerem")
 }
+
+func TestAnswerButtonOnANonAnswerableIdopontIsRefused(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	d := w.proposeEsemeny(t)
+	if err := w.h.App.ConfirmIdopont(ctx, "anna", d.ID, d.Idopontok[0].ID); err != nil {
+		t.Fatalf("ConfirmIdopont: %v", err)
+	}
+	editsBefore := len(w.h.Discord.Edits())
+
+	// A stale button of the Idopont that wasn't confirmed.
+	resp := w.router.Route(ctx, answerButton(t, "d-bela", d.ID, d.Idopontok[1].ID, domain.Igen)).Response
+	expectEphemeral(t, resp, "Erre az időpontra most nem lehet válaszolni.")
+	if len(w.h.Discord.Edits()) != editsBefore {
+		t.Fatal("a refused press edited the message")
+	}
+
+	// The confirmed one still takes answers.
+	routed := w.router.Route(ctx, answerButton(t, "d-bela", d.ID, d.Idopontok[0].ID, domain.Igen))
+	if routed.Response.Type != discordgo.InteractionResponseDeferredMessageUpdate {
+		t.Fatalf("reply = %+v, want a deferred update", routed.Response)
+	}
+
+	// Once Elmaradt, nothing does.
+	if err := w.h.App.CancelEsemeny(ctx, "anna", d.ID); err != nil {
+		t.Fatalf("CancelEsemeny: %v", err)
+	}
+	resp = w.router.Route(ctx, answerButton(t, "d-bela", d.ID, d.Idopontok[0].ID, domain.Nem)).Response
+	expectEphemeral(t, resp, "Erre az időpontra most nem lehet válaszolni.")
+
+	got, err := w.h.App.Esemeny(ctx, "anna", d.ID)
+	if err != nil {
+		t.Fatalf("Esemeny: %v", err)
+	}
+	if got.Idopontok[0].Igen != 1 || got.Idopontok[1].Igen != 0 {
+		t.Fatalf("idopontok = %+v, want only the igen on the confirmed one", got.Idopontok)
+	}
+}
