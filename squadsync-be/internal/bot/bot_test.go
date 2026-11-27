@@ -191,8 +191,13 @@ func TestCsatornaAutocompleteOffersOnlyAdminCsoports(t *testing.T) {
 func TestEveryCommandHasADefinition(t *testing.T) {
 	w := newWorld(t)
 	cmds := w.router.Commands()
-	if len(cmds) != 1 || cmds[0].Name != "csatorna" || len(cmds[0].Options) != 1 || !cmds[0].Options[0].Autocomplete {
-		t.Fatalf("commands = %+v, want /csatorna with an autocomplete option", cmds)
+	if len(cmds) != 2 {
+		t.Fatalf("commands = %+v, want /csatorna and /esemeny", cmds)
+	}
+	for n, name := range []string{"csatorna", "esemeny"} {
+		if cmds[n].Name != name || len(cmds[n].Options) != 1 || !cmds[n].Options[0].Autocomplete {
+			t.Fatalf("command %d = %+v, want /%s with an autocomplete option", n, cmds[n], name)
+		}
 	}
 }
 

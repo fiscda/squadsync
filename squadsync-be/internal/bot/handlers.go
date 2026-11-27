@@ -5,4 +5,6 @@ package bot
 func (r *Router) registerAll() {
 	r.Command(r.csatornaCommand())
 	r.Component(visszajelzesRoute, r.answerButton)
+	r.Command(r.esemenyCommand())
+	r.Modal(esemenyModalRoute, r.proposeFromModal)
 }
