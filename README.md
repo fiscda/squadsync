@@ -44,6 +44,8 @@ The bot connects in the background. If Discord can't be reached when Go starts (
 
 In a channel of that server, an Admin of a Csoport runs `/csatorna` and picks the Csoport to link the channel to it. The Csoport page on the web shows the linked channel, and Admins can unlink it there.
 
+Any Tag runs `/esemeny`, picks a Csoport and fills in the modal to propose an Esemény. Each line of its Időpontok field is `12.05 20:00`, `12.05 20:00-23:00`, `12.05-12.07` or `12.05 18:00-12.07 14:00` (month.day, Budapest time, up to 5 lines).
+
 ### 2. Configure the environment
 
 ```sh
