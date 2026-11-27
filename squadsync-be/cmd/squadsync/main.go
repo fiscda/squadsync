@@ -13,7 +13,8 @@
 //	BACKEND_PORT         port on 127.0.0.1 to listen on (default 8081)
 //	DISCORD_BOT_TOKEN    the bot's token; without it Go runs without the bot
 //	DISCORD_DEV_GUILD_ID register slash commands on this server only (optional)
-//	BETTER_AUTH_URL      public URL of the web app, for login links (required with the bot)
+//	BETTER_AUTH_URL      public URL of the web app, for login links and links in
+//	                     Discord messages (required with the bot)
 package main
 
 import (
@@ -105,6 +106,10 @@ func run(log *slog.Logger, args []string) error {
 		Discord:  discord,
 		Calendar: gateway.Disabled{},
 		Spotify:  gateway.Disabled{},
+
+		WebURL:       cfg.publicURL,
+		Log:          log,
+		AsyncDiscord: true,
 	})
 
 	if session == nil {
@@ -147,6 +152,9 @@ func run(log *slog.Logger, args []string) error {
 	if err := srv.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
+	// Let Discord messages already on their way finish (each call is
+	// bounded) before the bot disconnects.
+	a.WaitDiscord()
 	return nil
 }
 
