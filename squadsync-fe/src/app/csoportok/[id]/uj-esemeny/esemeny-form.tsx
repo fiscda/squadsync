@@ -35,6 +35,8 @@ export function EsemenyForm({ csoportId }: { csoportId: string }) {
     description: "",
     helyszinName: "",
     helyszinUrl: "",
+    hataridoDate: "",
+    hataridoTime: "",
   });
   const [rows, setRows] = useState<IdopontRow[]>([emptyRow(0)]);
 
@@ -208,6 +210,35 @@ export function EsemenyForm({ csoportId }: { csoportId: string }) {
             + Újabb időpont
           </button>
         ) : null}
+      </fieldset>
+
+      <fieldset className="flex flex-col gap-2">
+        <legend className="mb-1 font-medium">
+          Szavazási határidő{" "}
+          <span className="text-sm text-zinc-500">(nem kötelező)</span>
+        </legend>
+        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+          Budapesti idő szerint. Amikor lejár, Discordon üzenetet kapsz az
+          időpontok állásáról. A szavazás ezután is nyitva marad.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <input
+            type="date"
+            name="hataridoDate"
+            aria-label="Határidő napja"
+            value={fields.hataridoDate}
+            onChange={(e) => setField("hataridoDate", e.target.value)}
+            className={inputClass}
+          />
+          <input
+            type="time"
+            name="hataridoTime"
+            aria-label="Határidő ideje"
+            value={fields.hataridoTime}
+            onChange={(e) => setField("hataridoTime", e.target.value)}
+            className={inputClass}
+          />
+        </div>
       </fieldset>
 
       {state.error ? (

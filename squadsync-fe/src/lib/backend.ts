@@ -249,6 +249,8 @@ export type CsoportDetail = Csoport & {
   tags: Tag[];
   /** The linked Discord channel, or null. */
   csatorna: Csatorna | null;
+  /** Emlékeztető offsets in minutes before the start, longest first. */
+  emlekeztetoPercek: number[];
 };
 
 /** The Discord channel linked to a Csoport (with /csatorna in Discord). */
@@ -407,6 +409,24 @@ export async function leaveCsoport(
     felhasznaloId,
     "POST",
     `/csoport/${encodeURIComponent(csoportId)}/kilepes`,
+  );
+}
+
+/**
+ * Sets the Csoport's Emlékeztető offsets (minutes before the start, each one
+ * of EMLEKEZTETO_VALASZTEK; [] for none). Admins only (403); 400 for an
+ * offset not on the list.
+ */
+export async function setEmlekeztetok(
+  felhasznaloId: string,
+  csoportId: string,
+  percek: number[],
+): Promise<void> {
+  await callBackend<void>(
+    felhasznaloId,
+    "PUT",
+    `/csoport/${encodeURIComponent(csoportId)}/emlekezteto`,
+    { percek },
   );
 }
 
@@ -705,6 +725,8 @@ export type EsemenyDetail = Esemeny & {
   confirmedIdopontId: string | null;
   /** Ordered by name; empty unless Véglegesítve or Lezajlott. */
   resztvevok: Resztvevo[];
+  /** The voting Határidő (RFC 3339, UTC), null for none. */
+  hatarido: string | null;
 };
 
 export type EsemenyInput = {
@@ -716,6 +738,12 @@ export type EsemenyInput = {
    * egeszNapos, the first and last day like "2026-12-05" (both included).
    */
   idopontok: { start: string; end: string; egeszNapos: boolean }[];
+  /**
+   * The optional voting Határidő, a Budapest wall clock time like
+   * "2026-12-05T20:00", or "". Go answers 400 with code "hatarido_not_future"
+   * unless it is in the future.
+   */
+  hatarido: string;
 };
 
 export function proposeEsemeny(
@@ -818,5 +846,24 @@ export async function cancelEsemeny(
     felhasznaloId,
     "POST",
     `/esemeny/${encodeURIComponent(esemenyId)}/lemondas`,
+  );
+}
+
+/**
+ * The Szervező sets, changes or (with "") clears the voting Határidő, a
+ * Budapest wall clock time like "2026-12-05T20:00". Fails with 403 for anyone
+ * else, 409 outside Egyeztetés, and 400 (code "hatarido_not_future") for a
+ * time that isn't in the future.
+ */
+export async function setHatarido(
+  felhasznaloId: string,
+  esemenyId: string,
+  hatarido: string,
+): Promise<void> {
+  await callBackend<void>(
+    felhasznaloId,
+    "PUT",
+    `/esemeny/${encodeURIComponent(esemenyId)}/hatarido`,
+    { hatarido },
   );
 }

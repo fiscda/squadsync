@@ -70,6 +70,14 @@ _Avoid_: Éllovas, leader, rank, score
 A Tag or Vendég (including a name-only Vendég) whose Visszajelzés on the confirmed Időpont is igen. An Esemény has no Résztvevők until it is Véglegesítve.
 _Avoid_: Attendee, participant, igen-voter
 
+**Határidő**:
+An optional moment, set by the Szervező during Egyeztetés, when they are reminded by DM to choose the confirmed Időpont. Voting stays open after it passes.
+_Avoid_: Deadline, cutoff
+
+**Emlékeztető**:
+A DM sent before the confirmed Időpont's start to everyone with igen or talán on it, at offsets each Csoport sets (by default 24 hours and 1 hour before).
+_Avoid_: Reminder, notification
+
 **Helyszín**:
 Where an Esemény takes place: a free-text name with an optional Google Maps link. Each Esemény has one.
 _Avoid_: Location, venue, place

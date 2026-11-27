@@ -15,9 +15,12 @@ import {
   allapotLabel,
   formatEgeszNapos,
   formatIdopont,
+  formatMoment,
+  toLocalInputs,
   valaszLabel,
 } from "../format";
 import { CancelEsemeny } from "./cancel-esemeny";
+import { HataridoForm } from "./hatarido-form";
 import { IdopontRaeresLine } from "./raeres-line";
 
 export default function EsemenyPage({
@@ -80,6 +83,11 @@ async function Esemeny({
         <p className="text-sm text-zinc-500">
           {allapotLabel[esemeny.allapot]} · Szervező: {esemeny.szervezoName}
         </p>
+        {esemeny.hatarido !== null && esemeny.allapot === "egyeztetes" ? (
+          <p className="text-sm text-zinc-500">
+            Szavazási határidő: {formatMoment(esemeny.hatarido)}
+          </p>
+        ) : null}
       </div>
 
       {isAllapotHiba(hiba) ? (
@@ -160,6 +168,15 @@ function SzervezoControls({ esemeny }: { esemeny: EsemenyDetail }) {
           Válaszd ki a végleges időpontot a „Véglegesítés” gombbal. Bármelyiket
           választhatod, nem csak az elsőt.
         </p>
+      ) : null}
+      {esemeny.allapot === "egyeztetes" ? (
+        <HataridoForm
+          key={esemeny.hatarido ?? ""}
+          esemenyId={esemeny.id}
+          {...(esemeny.hatarido === null
+            ? { date: "", time: "" }
+            : toLocalInputs(esemeny.hatarido))}
+        />
       ) : null}
       <div className="flex flex-wrap items-start gap-2">
         {canReopen ? (
