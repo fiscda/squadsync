@@ -23,12 +23,12 @@ func (q Queries) InsertEsemeny(ctx context.Context, e domain.Esemeny) error {
 	return nil
 }
 
-const esemenyColumns = `id, csoport_id, title, description, helyszin_name, helyszin_url, szervezo_id, allapot, created_at`
+const esemenyColumns = `id, csoport_id, title, description, helyszin_name, helyszin_url, szervezo_id, allapot, COALESCE(confirmed_idopont_id, ''), created_at`
 
 func scanEsemeny(row rowScanner, extra ...any) (domain.Esemeny, error) {
 	var e domain.Esemeny
 	var allapot, createdAt string
-	dest := append([]any{&e.ID, &e.CsoportID, &e.Title, &e.Description, &e.Helyszin.Name, &e.Helyszin.URL, &e.SzervezoID, &allapot, &createdAt}, extra...)
+	dest := append([]any{&e.ID, &e.CsoportID, &e.Title, &e.Description, &e.Helyszin.Name, &e.Helyszin.URL, &e.SzervezoID, &allapot, &e.ConfirmedIdopontID, &createdAt}, extra...)
 	if err := row.Scan(dest...); err != nil {
 		return domain.Esemeny{}, err
 	}
@@ -51,6 +51,28 @@ func (q Queries) FindEsemeny(ctx context.Context, id string) (domain.Esemeny, er
 		return domain.Esemeny{}, fmt.Errorf("find esemeny: %w", err)
 	}
 	return e, nil
+}
+
+// UpdateEsemenyAllapot sets an Esemeny's state and its confirmed Idopont
+// ("" for none). It returns ErrNotFound if the Esemeny doesn't exist.
+func (q Queries) UpdateEsemenyAllapot(ctx context.Context, esemenyID string, allapot domain.Allapot, confirmedIdopontID string) error {
+	var confirmed any
+	if confirmedIdopontID != "" {
+		confirmed = confirmedIdopontID
+	}
+	res, err := q.db.ExecContext(ctx,
+		`UPDATE esemeny SET allapot = ?, confirmed_idopont_id = ? WHERE id = ?`,
+		string(allapot), confirmed, esemenyID,
+	)
+	if err != nil {
+		return fmt.Errorf("update esemeny allapot: %w", err)
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("update esemeny allapot: %w", err)
+	} else if n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // ListEsemenyekOfCsoport returns a Csoport's Esemenyek, newest first, each
@@ -175,6 +197,24 @@ func (q Queries) UpsertVisszajelzes(ctx context.Context, v domain.Visszajelzes) 
 		return fmt.Errorf("upsert visszajelzes: %w", err)
 	}
 	return nil
+}
+
+// FindValasz returns the Felhasznalo's Visszajelzes on the Idopont, or ""
+// if they haven't answered it. A name-only Vendeg's (#13) needs its own
+// lookup by vendeg_id.
+func (q Queries) FindValasz(ctx context.Context, idopontID, felhasznaloID string) (domain.Valasz, error) {
+	var valasz string
+	err := q.db.QueryRowContext(ctx,
+		`SELECT valasz FROM visszajelzes WHERE idopont_id = ? AND felhasznalo_id = ?`,
+		idopontID, felhasznaloID,
+	).Scan(&valasz)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("find valasz: %w", err)
+	}
+	return domain.Valasz(valasz), nil
 }
 
 // ListVisszajelzesekOfEsemeny returns every Visszajelzes on the Esemeny's

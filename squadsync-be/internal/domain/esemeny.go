@@ -31,7 +31,12 @@ type Esemeny struct {
 	// whoever proposed it.
 	SzervezoID string
 	Allapot    Allapot
-	CreatedAt  time.Time
+	// ConfirmedIdopontID is the stored confirmed Idopont: set in
+	// Veglegesitve and Lezajlott, "" in Egyeztetes. Elmaradt keeps it only
+	// as a record of what was planned, so read it through the core's
+	// confirmedIdopont, which ignores it there.
+	ConfirmedIdopontID string
+	CreatedAt          time.Time
 }
 
 // Helyszin is where an Esemeny takes place. Both parts are optional; an
@@ -92,6 +97,17 @@ type VisszajelzesOfEsemeny struct {
 	Visszajelzes
 	FelhasznaloName string
 	IsTag           bool
+}
+
+// Resztvevo is someone with igen on the confirmed Idopont of a Veglegesitve
+// (or Lezajlott) Esemeny. For now only Tags answer, so every Resztvevo is a
+// Tag and a Felhasznalo. #13 adds Vendegs: a Vendeg who is a Felhasznalo
+// keeps FelhasznaloID with IsTag false, and a name-only Vendeg has an empty
+// FelhasznaloID (and gets its own id field).
+type Resztvevo struct {
+	FelhasznaloID string
+	Name          string
+	IsTag         bool
 }
 
 // EsemenySummary is an Esemeny in a Csoport's list.

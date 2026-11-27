@@ -30,6 +30,42 @@ type DiscordMessenger interface {
 	// EditEsemenyMessage replaces an Esemeny's message posted earlier
 	// (in a channel or a DM) with m, in place and without notifying anyone.
 	EditEsemenyMessage(ctx context.Context, ref MessageRef, m EsemenyMessage) error
+	// PostAnnouncement posts a short plain-text announcement of an
+	// Esemeny's public moment (confirmed, reopened, cancelled) in a channel.
+	PostAnnouncement(ctx context.Context, channelID string, a Announcement) (MessageRef, error)
+	// SendAnnouncementDM sends the same announcement to one Discord account
+	// by direct message, for a Csoport without a Csatorna.
+	SendAnnouncementDM(ctx context.Context, discordID string, a Announcement) error
+	// SendDropOutDM tells one Discord account of the Szervezo that a
+	// Resztvevo dropped out.
+	SendDropOutDM(ctx context.Context, discordID string, d DropOut) error
+}
+
+// Announcement is a short plain-text message about a public moment of an
+// Esemeny. Its fields are plain text; the bot words and escapes them.
+type Announcement struct {
+	// Headline is fixed text from the core, e.g. "✅ Véglegesítve".
+	Headline    string
+	CsoportName string
+	Title       string
+	// Detail is extra text after the title, such as the confirmed
+	// Idopont's time, "" for none.
+	Detail string
+	// Link is the Esemeny's message in the Csatorna, or its web page.
+	// It may be a localhost URL, shown as text.
+	Link string
+}
+
+// DropOut tells the Szervezo that someone dropped from igen on the
+// confirmed Idopont. Its fields are plain text; the bot words and escapes
+// them. #16 adds what the drop-out freed (seats, beds, Tetelek).
+type DropOut struct {
+	// Name is who dropped out.
+	Name        string
+	CsoportName string
+	Title       string
+	// Link is the Esemeny's web page.
+	Link string
 }
 
 // VoteRequest asks a Tag to answer a new Esemeny. Its fields are plain
@@ -75,6 +111,9 @@ type EsemenyMessage struct {
 	// WebButton asks for a link button to URL, for when the answer buttons
 	// don't fit. It is never set without URL.
 	WebButton bool
+	// Resztvevok are the names of the Resztvevok, set only while the
+	// Esemeny has a confirmed Idopont.
+	Resztvevok []string
 }
 
 // MaxAnswerRows is how many Idopontok can have answer buttons: Discord
@@ -91,6 +130,8 @@ type IdopontLine struct {
 	Helyezes int
 	// Answerable asks for igen/talán/nem buttons on it.
 	Answerable bool
+	// Confirmed marks the Esemeny's confirmed Idopont.
+	Confirmed bool
 }
 
 // DiscordIdentity is the Discord account behind an OAuth authorization.
@@ -172,6 +213,21 @@ func (Disabled) SendEsemenyDM(context.Context, string, VoteRequest, EsemenyMessa
 
 // EditEsemenyMessage implements DiscordMessenger.
 func (Disabled) EditEsemenyMessage(context.Context, MessageRef, EsemenyMessage) error {
+	return ErrNotConfigured
+}
+
+// PostAnnouncement implements DiscordMessenger.
+func (Disabled) PostAnnouncement(context.Context, string, Announcement) (MessageRef, error) {
+	return MessageRef{}, ErrNotConfigured
+}
+
+// SendAnnouncementDM implements DiscordMessenger.
+func (Disabled) SendAnnouncementDM(context.Context, string, Announcement) error {
+	return ErrNotConfigured
+}
+
+// SendDropOutDM implements DiscordMessenger.
+func (Disabled) SendDropOutDM(context.Context, string, DropOut) error {
 	return ErrNotConfigured
 }
 

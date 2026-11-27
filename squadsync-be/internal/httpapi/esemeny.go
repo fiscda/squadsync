@@ -14,6 +14,9 @@ func (s *server) registerEsemeny(mux *http.ServeMux) {
 	mux.HandleFunc("GET /csoport/{id}/esemeny", withFelhasznalo(s.listEsemenyek))
 	mux.HandleFunc("GET /esemeny/{id}", withFelhasznalo(s.getEsemeny))
 	mux.HandleFunc("PUT /esemeny/{id}/idopont/{idopontID}/visszajelzes", withFelhasznalo(s.setVisszajelzes))
+	mux.HandleFunc("POST /esemeny/{id}/veglegesites", withFelhasznalo(s.confirmIdopont))
+	mux.HandleFunc("POST /esemeny/{id}/ujranyitas", withFelhasznalo(s.reopenEgyeztetes))
+	mux.HandleFunc("POST /esemeny/{id}/lemondas", withFelhasznalo(s.cancelEsemeny))
 }
 
 // The wire forms below are kept in sync by hand with the types in
@@ -64,6 +67,16 @@ type idopontJSON struct {
 	// Sajat is the caller's own answer, null if none.
 	Sajat          *string            `json:"sajat"`
 	Visszajelzesek []visszajelzesJSON `json:"visszajelzesek"`
+	// Answerable: it takes Visszajelzesek now.
+	Answerable bool `json:"answerable"`
+	// Confirmed: the Esemeny's confirmed Idopont (Veglegesitve or Lezajlott).
+	Confirmed bool `json:"confirmed"`
+}
+
+type resztvevoJSON struct {
+	FelhasznaloID string `json:"felhasznaloId"`
+	Name          string `json:"name"`
+	IsTag         bool   `json:"isTag"`
 }
 
 type esemenyDetailJSON struct {
@@ -71,6 +84,11 @@ type esemenyDetailJSON struct {
 	CsoportName  string        `json:"csoportName"`
 	SzervezoName string        `json:"szervezoName"`
 	Idopontok    []idopontJSON `json:"idopontok"`
+	// ConfirmedIdopontID is set only while the Esemeny has Resztvevok
+	// (Veglegesitve, Lezajlott), null otherwise.
+	ConfirmedIdopontID *string `json:"confirmedIdopontId"`
+	// Resztvevok are empty unless the Esemeny is Veglegesitve or Lezajlott.
+	Resztvevok []resztvevoJSON `json:"resztvevok"`
 }
 
 func toEsemenyJSON(e domain.Esemeny) esemenyJSON {
@@ -97,6 +115,8 @@ func toIdopontJSON(a app.IdopontAllas) idopontJSON {
 		Talan:          a.Talan,
 		Nem:            a.Nem,
 		Visszajelzesek: make([]visszajelzesJSON, 0, len(a.Visszajelzesek)),
+		Answerable:     a.Answerable,
+		Confirmed:      a.Confirmed,
 	}
 	if a.Helyezes > 0 {
 		h := int(a.Helyezes)
@@ -173,12 +193,56 @@ func (s *server) getEsemeny(w http.ResponseWriter, r *http.Request, felhasznaloI
 	for _, a := range d.Idopontok {
 		idopontok = append(idopontok, toIdopontJSON(a))
 	}
+	resztvevok := make([]resztvevoJSON, 0, len(d.Resztvevok))
+	for _, r := range d.Resztvevok {
+		resztvevok = append(resztvevok, resztvevoJSON{FelhasznaloID: r.FelhasznaloID, Name: r.Name, IsTag: r.IsTag})
+	}
 	writeJSON(w, http.StatusOK, esemenyDetailJSON{
-		esemenyJSON:  toEsemenyJSON(d.Esemeny),
-		CsoportName:  d.CsoportName,
-		SzervezoName: d.SzervezoName,
-		Idopontok:    idopontok,
+		esemenyJSON:        toEsemenyJSON(d.Esemeny),
+		CsoportName:        d.CsoportName,
+		SzervezoName:       d.SzervezoName,
+		Idopontok:          idopontok,
+		Resztvevok:         resztvevok,
+		ConfirmedIdopontID: nullable(d.ConfirmedIdopont),
 	})
+}
+
+// nullable is nil for "", so JSON shows null.
+func nullable(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+func (s *server) confirmIdopont(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
+	var body struct {
+		IdopontID string `json:"idopontId"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	if err := s.app.ConfirmIdopont(r.Context(), felhasznaloID, r.PathValue("id"), body.IdopontID); err != nil {
+		s.writeEsemenyError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *server) reopenEgyeztetes(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
+	if err := s.app.ReopenEgyeztetes(r.Context(), felhasznaloID, r.PathValue("id")); err != nil {
+		s.writeEsemenyError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *server) cancelEsemeny(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
+	if err := s.app.CancelEsemeny(r.Context(), felhasznaloID, r.PathValue("id")); err != nil {
+		s.writeEsemenyError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *server) setVisszajelzes(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
@@ -197,8 +261,12 @@ func (s *server) setVisszajelzes(w http.ResponseWriter, r *http.Request, felhasz
 }
 
 func (s *server) writeEsemenyError(w http.ResponseWriter, r *http.Request, err error) {
-	if errors.Is(err, app.ErrIdopontNotAnswerable) {
+	switch {
+	case errors.Is(err, app.ErrIdopontNotAnswerable), errors.Is(err, app.ErrInvalidTransition):
 		writeError(w, http.StatusConflict, err.Error())
+		return
+	case errors.Is(err, app.ErrNotSzervezo):
+		writeError(w, http.StatusForbidden, err.Error())
 		return
 	}
 	// Checked before the generic ErrInvalidInput it wraps, so the web can
