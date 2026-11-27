@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"squadsync-be/internal/domain"
@@ -49,6 +50,8 @@ type CsoportDetail struct {
 	Tags  []domain.TagWithName
 	// Csatorna is the linked Discord channel, or nil if there is none.
 	Csatorna *domain.Csatorna
+	// Emlekeztetok are the Emlekezteto offsets, longest first.
+	Emlekeztetok []time.Duration
 }
 
 // CreateCsoport creates a Csoport. The creator becomes its first Tag, with
@@ -260,6 +263,9 @@ func (a *App) Csoport(ctx context.Context, felhasznaloID, csoportID string) (Cso
 	d := CsoportDetail{Csoport: csoport, Admin: tag.Admin, Muted: tag.Muted, Tags: tags}
 	if err == nil {
 		d.Csatorna = &csatorna
+	}
+	if d.Emlekeztetok, err = emlekeztetok(ctx, a.store.Queries, csoportID); err != nil {
+		return CsoportDetail{}, err
 	}
 	return d, nil
 }

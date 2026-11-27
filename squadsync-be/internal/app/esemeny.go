@@ -61,6 +61,9 @@ type EsemenyInput struct {
 	Description string
 	Helyszin    domain.Helyszin
 	Idopontok   []IdopontInput
+	// Hatarido is the optional voting deadline, a Budapest wall clock time
+	// in LocalTimeLayout ("" for none). It must be in the future.
+	Hatarido string
 }
 
 // IdopontInput is one candidate time.
@@ -92,6 +95,8 @@ type EsemenyDetail struct {
 	// Resztvevok are ordered by name; empty unless the Esemeny is
 	// Veglegesitve or Lezajlott (see resztvevokOf).
 	Resztvevok []domain.Resztvevo
+	// Hatarido is the voting deadline, nil for none (see hatarido.go).
+	Hatarido *time.Time
 }
 
 // IdopontAllas is an Idopont with how it stands: its counts and Helyezes
@@ -122,6 +127,10 @@ func (a *App) ProposeEsemeny(ctx context.Context, felhasznaloID, csoportID strin
 	if err != nil {
 		return domain.Esemeny{}, err
 	}
+	hatarido, err := parseHatarido(in.Hatarido, a.clock.Now())
+	if err != nil {
+		return domain.Esemeny{}, err
+	}
 	err = a.store.InTx(ctx, func(q store.Queries) error {
 		if _, err := requireTag(ctx, q, csoportID, felhasznaloID); err != nil {
 			return err
@@ -134,7 +143,7 @@ func (a *App) ProposeEsemeny(ctx context.Context, felhasznaloID, csoportID strin
 				return err
 			}
 		}
-		return nil
+		return a.setHatarido(ctx, q, e.ID, hatarido)
 	})
 	if err != nil {
 		return domain.Esemeny{}, err
@@ -329,8 +338,13 @@ func esemenyDetail(ctx context.Context, q store.Queries, e domain.Esemeny, viewe
 	if err != nil {
 		return EsemenyDetail{}, err
 	}
+	hatarido, err := q.FindHatarido(ctx, e.ID)
+	if err != nil {
+		return EsemenyDetail{}, err
+	}
 	confirmed, _ := confirmedIdopont(e)
 	return EsemenyDetail{
+		Hatarido:         hatarido,
 		Esemeny:          e,
 		CsoportName:      csoport.Name,
 		SzervezoName:     szervezo.Name,

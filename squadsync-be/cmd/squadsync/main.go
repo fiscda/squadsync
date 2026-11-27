@@ -1,5 +1,5 @@
-// Command squadsync runs the Go backend: the internal HTTP API on localhost
-// and the Discord bot (and, in later tickets, timed jobs).
+// Command squadsync runs the Go backend: the internal HTTP API on localhost,
+// the Discord bot and the once-a-minute loop of timed jobs.
 //
 // Usage:
 //
@@ -49,6 +49,13 @@ const minSecretLength = 32
 // discordShutdownTimeout bounds how long shutdown waits for queued Discord
 // messages.
 const discordShutdownTimeout = 10 * time.Second
+
+// jobInterval is how often due timed jobs run; jobTickTimeout bounds one
+// run of them.
+const (
+	jobInterval    = time.Minute
+	jobTickTimeout = 50 * time.Second
+)
 
 type config struct {
 	dbPath string
@@ -161,6 +168,12 @@ func run(log *slog.Logger, args []string) error {
 		errc <- srv.ListenAndServe()
 	}()
 
+	jobsStopped := make(chan struct{})
+	go func() {
+		defer close(jobsStopped)
+		runJobs(ctx, a, log)
+	}()
+
 	select {
 	case err := <-errc:
 		return err
@@ -173,12 +186,38 @@ func run(log *slog.Logger, args []string) error {
 	if err := srv.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
+	// Let the job run in progress finish: its Discord work is queued
+	// before WaitDiscord stops taking more.
+	<-jobsStopped
 	// Let queued Discord messages go out before the bot disconnects, for at
 	// most discordShutdownTimeout; the rest are abandoned.
 	waitCtx, cancelWait := context.WithTimeout(context.Background(), discordShutdownTimeout)
 	defer cancelWait()
 	a.WaitDiscord(waitCtx)
 	return nil
+}
+
+// runJobs runs the due timed jobs at once (catching up on any missed while
+// the server was down) and then every jobInterval, until ctx ends. A run in
+// progress isn't interrupted; the loop returns after it.
+func runJobs(ctx context.Context, a *app.App, log *slog.Logger) {
+	tick := func() {
+		tctx, cancel := context.WithTimeout(context.Background(), jobTickTimeout)
+		defer cancel()
+		if err := a.RunDueJobs(tctx); err != nil {
+			log.Error("run timed jobs", "err", err)
+		}
+	}
+	ticker := time.NewTicker(jobInterval)
+	defer ticker.Stop()
+	for {
+		tick()
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 func loadConfig(migrateOnly bool) (config, error) {
