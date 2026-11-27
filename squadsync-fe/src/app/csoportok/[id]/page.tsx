@@ -71,7 +71,11 @@ async function Csoport({ csoportId }: { csoportId: string }) {
 async function MeghivoSection({ csoportId }: { csoportId: string }) {
   const meghivok = (await getCsoportMeghivok(csoportId)) ?? [];
   // The public address of the web app, so the copied link works anywhere.
-  const baseUrl = (process.env.BETTER_AUTH_URL ?? "").replace(/\/$/, "");
+  const publicUrl = process.env.BETTER_AUTH_URL;
+  if (!publicUrl) {
+    throw new Error("BETTER_AUTH_URL is not set (see .env.example)");
+  }
+  const baseUrl = publicUrl.replace(/\/$/, "");
 
   return (
     <section className="flex flex-col gap-3">

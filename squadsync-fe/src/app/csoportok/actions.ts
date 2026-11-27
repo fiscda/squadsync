@@ -36,10 +36,22 @@ export async function createCsoportAction(
   redirect(`/csoportok/${csoportId}`);
 }
 
-/** Makes a new Csoport-meghívó for a Csoport the caller is a Tag of. */
+/**
+ * Makes a new Csoport-meghívó for a Csoport the caller is a Tag of. A 404
+ * means the page is stale (the caller is no longer a Tag), so go back to the
+ * list.
+ */
 export async function createMeghivoAction(csoportId: string) {
   const felhasznalo = await requireFelhasznalo();
-  await createCsoportMeghivo(felhasznalo.id, csoportId);
+  try {
+    await createCsoportMeghivo(felhasznalo.id, csoportId);
+  } catch (err) {
+    unstable_rethrow(err);
+    if (err instanceof BackendError && err.status === 404) {
+      redirect("/csoportok");
+    }
+    throw err;
+  }
   revalidatePath(`/csoportok/${csoportId}`);
 }
 
@@ -49,6 +61,14 @@ export async function revokeMeghivoAction(
   meghivoId: string,
 ) {
   const felhasznalo = await requireFelhasznalo();
-  await revokeCsoportMeghivo(felhasznalo.id, csoportId, meghivoId);
+  try {
+    await revokeCsoportMeghivo(felhasznalo.id, csoportId, meghivoId);
+  } catch (err) {
+    unstable_rethrow(err);
+    if (err instanceof BackendError && err.status === 404) {
+      redirect("/csoportok");
+    }
+    throw err;
+  }
   revalidatePath(`/csoportok/${csoportId}`);
 }

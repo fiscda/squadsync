@@ -20,6 +20,7 @@ func (s *server) registerCsoport(mux *http.ServeMux) {
 	// Opening a link comes first and needs no Felhasznalo: the join page
 	// shows which Csoport the link is for before the visitor has logged in.
 	mux.HandleFunc("GET /csoport-meghivo/{token}", s.previewCsoportMeghivo)
+	mux.HandleFunc("GET /csoport-meghivo/{token}/tag", withFelhasznalo(s.tagOfCsoportMeghivo))
 	mux.HandleFunc("POST /csoport-meghivo/{token}/join", withFelhasznalo(s.joinCsoport))
 }
 
@@ -56,6 +57,12 @@ type csoportMeghivoJSON struct {
 	ID        string    `json:"id"`
 	Token     string    `json:"token"`
 	CreatedAt time.Time `json:"createdAt"`
+}
+
+// meghivoPreviewJSON is all that the holder of a link may learn before
+// joining: the name of the Csoport.
+type meghivoPreviewJSON struct {
+	Name string `json:"name"`
 }
 
 func toCsoportJSON(c domain.Csoport) csoportJSON {
@@ -144,7 +151,18 @@ func (s *server) previewCsoportMeghivo(w http.ResponseWriter, r *http.Request) {
 		s.writeCsoportError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, toCsoportJSON(c))
+	writeJSON(w, http.StatusOK, meghivoPreviewJSON{Name: c.Name})
+}
+
+func (s *server) tagOfCsoportMeghivo(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
+	id, err := s.app.TagCsoportOfMeghivo(r.Context(), felhasznaloID, r.PathValue("token"))
+	if err != nil {
+		s.writeCsoportError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		CsoportID string `json:"csoportId"`
+	}{id})
 }
 
 func (s *server) joinCsoport(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
@@ -162,6 +180,10 @@ func (s *server) joinCsoport(w http.ResponseWriter, r *http.Request, felhasznalo
 func (s *server) writeCsoportError(w http.ResponseWriter, r *http.Request, err error) {
 	if errors.Is(err, app.ErrCsoportMeghivoRevoked) {
 		writeError(w, http.StatusGone, err.Error())
+		return
+	}
+	if errors.Is(err, app.ErrFelhasznaloUnknown) {
+		writeError(w, http.StatusForbidden, err.Error())
 		return
 	}
 	s.writeAppError(w, r, err)

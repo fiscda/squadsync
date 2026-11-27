@@ -88,8 +88,8 @@ func TestCsoportNeedsAReasonableName(t *testing.T) {
 
 func TestUnknownFelhasznaloCannotCreateCsoport(t *testing.T) {
 	h := apptest.New(t)
-	if _, err := h.App.CreateCsoport(context.Background(), "nobody", "Csoport"); !errors.Is(err, app.ErrNotFound) {
-		t.Fatalf("CreateCsoport by an unknown Felhasznalo: err = %v, want ErrNotFound", err)
+	if _, err := h.App.CreateCsoport(context.Background(), "nobody", "Csoport"); !errors.Is(err, app.ErrFelhasznaloUnknown) {
+		t.Fatalf("CreateCsoport by an unknown Felhasznalo: err = %v, want ErrFelhasznaloUnknown", err)
 	}
 }
 
@@ -466,7 +466,38 @@ func TestMyCsoportokListsEveryCsoportOfATag(t *testing.T) {
 func TestJoinByUnknownFelhasznaloIsNotFound(t *testing.T) {
 	h := apptest.New(t)
 	_, m := csoportWithMeghivo(t, h)
-	if _, err := h.App.JoinCsoport(context.Background(), "nobody", m.Token); !errors.Is(err, app.ErrNotFound) {
-		t.Fatalf("JoinCsoport by an unknown Felhasznalo: err = %v, want ErrNotFound", err)
+	if _, err := h.App.JoinCsoport(context.Background(), "nobody", m.Token); !errors.Is(err, app.ErrFelhasznaloUnknown) || errors.Is(err, app.ErrNotFound) {
+		t.Fatalf("JoinCsoport by an unknown Felhasznalo: err = %v, want ErrFelhasznaloUnknown and not ErrNotFound", err)
+	}
+}
+
+func TestExistingTagIsLetInThroughARevokedLink(t *testing.T) {
+	h := apptest.New(t)
+	ctx := context.Background()
+	c, m := csoportWithMeghivo(t, h)
+	addFelhasznalo(t, h, "bela", "Béla")
+	addFelhasznalo(t, h, "cili", "Cili")
+	if _, err := h.App.JoinCsoport(ctx, "bela", m.Token); err != nil {
+		t.Fatalf("Béla joins: %v", err)
+	}
+	if err := h.App.RevokeCsoportMeghivo(ctx, "anna", c.ID, m.ID); err != nil {
+		t.Fatalf("RevokeCsoportMeghivo: %v", err)
+	}
+
+	res, err := h.App.JoinCsoport(ctx, "bela", m.Token)
+	if err != nil || res.Joined || res.Csoport.ID != c.ID {
+		t.Fatalf("existing Tag opening a revoked link: %+v, %v, want the Csoport and not Joined", res, err)
+	}
+	if id, err := h.App.TagCsoportOfMeghivo(ctx, "bela", m.Token); err != nil || id != c.ID {
+		t.Fatalf("TagCsoportOfMeghivo(Béla) = %q, %v, want %s", id, err, c.ID)
+	}
+	if _, err := h.App.TagCsoportOfMeghivo(ctx, "cili", m.Token); !errors.Is(err, app.ErrNotFound) {
+		t.Fatalf("TagCsoportOfMeghivo(non-Tag): err = %v, want ErrNotFound", err)
+	}
+	if _, err := h.App.TagCsoportOfMeghivo(ctx, "bela", "no-such-token"); !errors.Is(err, app.ErrNotFound) {
+		t.Fatalf("TagCsoportOfMeghivo(unknown token): err = %v, want ErrNotFound", err)
+	}
+	if _, err := h.App.JoinCsoport(ctx, "cili", m.Token); !errors.Is(err, app.ErrCsoportMeghivoRevoked) {
+		t.Fatalf("non-Tag opening a revoked link: err = %v, want ErrCsoportMeghivoRevoked", err)
 	}
 }

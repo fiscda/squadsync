@@ -171,8 +171,8 @@ func TestMeghivoFlowOverHTTP(t *testing.T) {
 	// The preview needs only the secret: the visitor hasn't logged in yet.
 	rec = call(t, api, http.MethodGet, "/csoport-meghivo/"+m.Token, "", map[string]string{httpapi.HeaderSecret: secret})
 	expectStatus(t, rec, http.StatusOK)
-	if p := decode[csoportResp](t, rec); p.Name != "Péntek esték" {
-		t.Fatalf("preview = %+v", p)
+	if got := rec.Body.String(); got != "{\"name\":\"Péntek esték\"}\n" {
+		t.Fatalf("preview body = %q, want only the name", got)
 	}
 
 	rec = call(t, api, http.MethodPost, "/csoport-meghivo/"+m.Token+"/join", "", as("bela"))
@@ -203,6 +203,17 @@ func TestMeghivoFlowOverHTTP(t *testing.T) {
 	expectStatus(t, call(t, api, http.MethodGet, "/csoport-meghivo/"+m.Token, "", map[string]string{httpapi.HeaderSecret: secret}), http.StatusGone)
 	expectStatus(t, call(t, api, http.MethodPost, "/csoport-meghivo/"+m.Token+"/join", "", as("cili")), http.StatusGone)
 
+	// An existing Tag still gets in through a revoked link.
+	rec = call(t, api, http.MethodGet, "/csoport-meghivo/"+m.Token+"/tag", "", as("bela"))
+	expectStatus(t, rec, http.StatusOK)
+	if got := decode[struct {
+		CsoportID string `json:"csoportId"`
+	}](t, rec); got.CsoportID != created.ID {
+		t.Fatalf("tag lookup = %+v, want %s", got, created.ID)
+	}
+	expectStatus(t, call(t, api, http.MethodGet, "/csoport-meghivo/"+m.Token+"/tag", "", as("cili")), http.StatusNotFound)
+	expectStatus(t, call(t, api, http.MethodPost, "/csoport-meghivo/"+m.Token+"/join", "", as("bela")), http.StatusOK)
+
 	rec = call(t, api, http.MethodGet, "/csoport/"+created.ID+"/meghivo", "", as("anna"))
 	if list := decode[[]meghivoResp](t, rec); len(list) != 0 {
 		t.Fatalf("revoked link still listed: %+v", list)
@@ -214,4 +225,13 @@ func TestUnknownTokenAnswers404(t *testing.T) {
 	login(t, api, "anna", "111", "Anna")
 	expectStatus(t, call(t, api, http.MethodGet, "/csoport-meghivo/nope", "", map[string]string{httpapi.HeaderSecret: secret}), http.StatusNotFound)
 	expectStatus(t, call(t, api, http.MethodPost, "/csoport-meghivo/nope/join", "", as("anna")), http.StatusNotFound)
+}
+
+func TestUnknownFelhasznaloIsNotMistakenForAnUnknownToken(t *testing.T) {
+	api := newAPI(t)
+	login(t, api, "anna", "111", "Anna")
+	created := decode[csoportResp](t, call(t, api, http.MethodPost, "/csoport", `{"name":"X"}`, as("anna")))
+	m := decode[meghivoResp](t, call(t, api, http.MethodPost, "/csoport/"+created.ID+"/meghivo", "", as("anna")))
+
+	expectStatus(t, call(t, api, http.MethodPost, "/csoport-meghivo/"+m.Token+"/join", "", as("nobody")), http.StatusForbidden)
 }

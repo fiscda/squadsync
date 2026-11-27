@@ -21,6 +21,11 @@ const MaxCsoportNameLength = 60
 // so it no longer works.
 var ErrCsoportMeghivoRevoked = errors.New("csoport-meghivo revoked")
 
+// ErrFelhasznaloUnknown means the acting Felhasznalo doesn't exist. It is
+// deliberately not ErrNotFound, so it can't be mistaken for an unknown
+// Csoport or link.
+var ErrFelhasznaloUnknown = errors.New("felhasznalo unknown")
+
 // CsoportDetail is a Csoport as one of its Tags sees it.
 type CsoportDetail struct {
 	domain.Csoport
@@ -151,17 +156,23 @@ type JoinResult struct {
 }
 
 // JoinCsoport makes the Felhasznalo a Tag of the Csoport behind the link
-// token. A Felhasznalo who already is a Tag keeps their Tag, role included.
-// An unknown token gives ErrNotFound, a revoked one ErrCsoportMeghivoRevoked.
+// token. A Felhasznalo who already is a Tag keeps their Tag, role included,
+// and gets the Csoport back even if the link has been revoked. Otherwise an
+// unknown token gives ErrNotFound and a revoked one ErrCsoportMeghivoRevoked.
+// An unknown Felhasznalo gives ErrFelhasznaloUnknown.
 func (a *App) JoinCsoport(ctx context.Context, felhasznaloID, token string) (JoinResult, error) {
 	var result JoinResult
 	err := a.store.InTx(ctx, func(q store.Queries) error {
 		if err := requireFelhasznalo(ctx, q, felhasznaloID); err != nil {
 			return err
 		}
-		csoport, err := a.workingCsoport(ctx, q, token)
+		m, err := q.FindCsoportMeghivoByToken(ctx, token)
 		if err != nil {
-			return err
+			return notFound(err)
+		}
+		csoport, err := q.FindCsoport(ctx, m.CsoportID)
+		if err != nil {
+			return notFound(err)
 		}
 		result.Csoport = csoport
 
@@ -171,6 +182,9 @@ func (a *App) JoinCsoport(ctx context.Context, felhasznaloID, token string) (Joi
 		}
 		if !errors.Is(err, store.ErrNotFound) {
 			return err
+		}
+		if m.Revoked() {
+			return ErrCsoportMeghivoRevoked
 		}
 		result.Joined = true
 		return q.InsertTag(ctx, domain.Tag{
@@ -183,6 +197,21 @@ func (a *App) JoinCsoport(ctx context.Context, felhasznaloID, token string) (Joi
 		return JoinResult{}, err
 	}
 	return result, nil
+}
+
+// TagCsoportOfMeghivo returns the id of the Csoport behind a link token if
+// the Felhasznalo already is a Tag of it, even when the link was revoked, so
+// the join page can send existing Tags straight in. Anyone else, and any
+// unknown token, gets ErrNotFound.
+func (a *App) TagCsoportOfMeghivo(ctx context.Context, felhasznaloID, token string) (string, error) {
+	m, err := a.store.FindCsoportMeghivoByToken(ctx, token)
+	if err != nil {
+		return "", notFound(err)
+	}
+	if _, err := requireTag(ctx, a.store.Queries, m.CsoportID, felhasznaloID); err != nil {
+		return "", err
+	}
+	return m.CsoportID, nil
 }
 
 // workingCsoport finds the Csoport behind a link token, refusing an unknown
@@ -213,10 +242,11 @@ func requireTag(ctx context.Context, q store.Queries, csoportID, felhasznaloID s
 }
 
 func requireFelhasznalo(ctx context.Context, q store.Queries, id string) error {
-	if _, err := q.FindFelhasznalo(ctx, id); err != nil {
-		return notFound(err)
+	_, err := q.FindFelhasznalo(ctx, id)
+	if errors.Is(err, store.ErrNotFound) {
+		return ErrFelhasznaloUnknown
 	}
-	return nil
+	return err
 }
 
 // notFound turns the store's not-found into the application's.

@@ -208,8 +208,11 @@ export async function revokeCsoportMeghivo(
   );
 }
 
+/** All that a link's holder may learn before joining: the Csoport's name. */
+export type MeghivoCsoport = { name: string };
+
 export type MeghivoPreview =
-  | { status: "ok"; csoport: Csoport }
+  | { status: "ok"; csoport: MeghivoCsoport }
   | { status: "revoked" }
   | { status: "not-found" };
 
@@ -218,7 +221,7 @@ export async function previewCsoportMeghivo(
   token: string,
 ): Promise<MeghivoPreview> {
   try {
-    const csoport = await callBackend<Csoport>(
+    const csoport = await callBackend<MeghivoCsoport>(
       null,
       "GET",
       `/csoport-meghivo/${encodeURIComponent(token)}`,
@@ -227,6 +230,24 @@ export async function previewCsoportMeghivo(
   } catch (err) {
     return meghivoRefusal(err);
   }
+}
+
+/**
+ * The id of the Csoport behind a link if the Felhasználó already is a Tag of
+ * it, even when the link was revoked. Null for anyone else.
+ */
+export async function getTagCsoportOfMeghivo(
+  felhasznaloId: string,
+  token: string,
+): Promise<string | null> {
+  const found = await nullOnNotFound(
+    callBackend<{ csoportId: string }>(
+      felhasznaloId,
+      "GET",
+      `/csoport-meghivo/${encodeURIComponent(token)}/tag`,
+    ),
+  );
+  return found?.csoportId ?? null;
 }
 
 export type JoinOutcome =
@@ -250,7 +271,10 @@ export async function joinCsoport(
   }
 }
 
-/** Go answers 410 for a revoked link and 404 for an unknown one. */
+/**
+ * Go answers 410 for a revoked link and 404 for an unknown one. (An unknown
+ * Felhasználó is a 403, which stays an error.)
+ */
 function meghivoRefusal(err: unknown): {
   status: "revoked" | "not-found";
 } {

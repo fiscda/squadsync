@@ -5,13 +5,18 @@ import {
   type CsoportDetail,
   type CsoportMeghivo,
   type CsoportSummary,
+  getTagCsoportOfMeghivo,
   joinCsoport,
   listCsoportMeghivok,
   listCsoportok,
   type MeghivoPreview,
   previewCsoportMeghivo,
 } from "./backend";
-import { ensureFelhasznalo, requireFelhasznalo } from "./felhasznalo";
+import {
+  ensureFelhasznalo,
+  getCurrentFelhasznalo,
+  requireFelhasznalo,
+} from "./felhasznalo";
 
 // Reads are side-effect free and cached for one request, so a page and its
 // components can ask for the same thing without calling Go twice.
@@ -41,6 +46,20 @@ export const getCsoportMeghivok = cache(
 /** Which Csoport a link is for, or why it doesn't work. Needs no login. */
 export const getMeghivoPreview = cache(
   (token: string): Promise<MeghivoPreview> => previewCsoportMeghivo(token),
+);
+
+/**
+ * The Csoport behind a link if the logged-in Felhasználó already is a Tag of
+ * it (even when the link was revoked), so they can be sent straight in.
+ */
+export const getExistingTagCsoportId = cache(
+  async (token: string): Promise<string | null> => {
+    const current = await getCurrentFelhasznalo();
+    if (current.status !== "ok") {
+      return null;
+    }
+    return getTagCsoportOfMeghivo(current.felhasznalo.id, token);
+  },
 );
 
 export type JoinWithTokenResult =

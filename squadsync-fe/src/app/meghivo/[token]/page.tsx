@@ -1,6 +1,7 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { Suspense } from "react";
-import { getMeghivoPreview } from "@/lib/csoport";
+import { getExistingTagCsoportId, getMeghivoPreview } from "@/lib/csoport";
 import { getCurrentFelhasznalo } from "@/lib/felhasznalo";
 import { buttonClass, linkClass } from "@/lib/ui";
 import { joinAction, signInForMeghivo } from "../actions";
@@ -19,6 +20,12 @@ export default function MeghivoPage({ params }: PageProps<"/meghivo/[token]">) {
 
 // Reads the session and the route params, so it streams in behind Suspense.
 async function Meghivo({ token }: { token: string }) {
+  // A Tag of that Csoport goes straight in, even if the link was revoked.
+  const tagCsoportId = await getExistingTagCsoportId(token);
+  if (tagCsoportId !== null) {
+    redirect(`/csoportok/${tagCsoportId}`);
+  }
+
   const preview = await getMeghivoPreview(token);
 
   if (preview.status === "revoked") {
