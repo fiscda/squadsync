@@ -13,3 +13,6 @@
 /squadsync-be/bin/
 
 .DS_Store
+
+# local SQLite data (make dev)
+/data/
