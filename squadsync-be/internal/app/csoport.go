@@ -26,12 +26,18 @@ var ErrCsoportMeghivoRevoked = errors.New("csoport-meghivo revoked")
 // Csoport or link.
 var ErrFelhasznaloUnknown = errors.New("felhasznalo unknown")
 
+// ErrNotAdmin means the acting Felhasznalo is a Tag of the Csoport but not
+// an Admin, and the action needs one.
+var ErrNotAdmin = errors.New("not an admin of the csoport")
+
 // CsoportDetail is a Csoport as one of its Tags sees it.
 type CsoportDetail struct {
 	domain.Csoport
 	// Admin tells whether the viewing Tag is an Admin.
 	Admin bool
 	Tags  []domain.TagWithName
+	// Csatorna is the linked Discord channel, or nil if there is none.
+	Csatorna *domain.Csatorna
 }
 
 // CreateCsoport creates a Csoport. The creator becomes its first Tag, with
@@ -89,7 +95,15 @@ func (a *App) Csoport(ctx context.Context, felhasznaloID, csoportID string) (Cso
 	if err != nil {
 		return CsoportDetail{}, err
 	}
-	return CsoportDetail{Csoport: csoport, Admin: tag.Admin, Tags: tags}, nil
+	csatorna, err := a.store.FindCsatorna(ctx, csoportID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return CsoportDetail{}, err
+	}
+	d := CsoportDetail{Csoport: csoport, Admin: tag.Admin, Tags: tags}
+	if err == nil {
+		d.Csatorna = &csatorna
+	}
+	return d, nil
 }
 
 // CreateCsoportMeghivo makes a new reusable Csoport-meghivo. Any Tag may do
