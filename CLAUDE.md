@@ -22,10 +22,25 @@ Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. Domain terms are
 
 ## Commands
 
-- Backend tests: `cd squadsync-be && go test ./...`
-- Frontend lint: `cd squadsync-fe && bun run lint`
-- Frontend type check: `cd squadsync-fe && bunx tsc --noEmit`
-- Frontend dependencies: always use `bun` (never npm, yarn or pnpm).
+- **Every check:** `make test` (Go tests) and `make lint` (Biome, Next typegen, tsc). Both must pass before you open a PR. Also run `cd squadsync-be && go vet ./... && gofmt -l .`.
+- **Running locally:** `make install`, then `make dev`. Variables come from the root `.env`, and `.env.example` lists them all.
+- **Frontend dependencies:** always use `bun` (never npm, yarn or pnpm).
+
+## Code conventions (established in #2, follow them)
+
+**Backend (`squadsync-be/internal/`)**
+- **Use cases:** methods on `*app.App` in `app/<area>.go`. Area-specific errors live in that area's file. Only `ErrNotFound` and `ErrInvalidInput` live in `app.go`.
+- **Tests:** in package `app_test`, using `apptest.New(t)`, which provides the app, the store, a fake clock and recording fakes. Test behaviour through use cases.
+- **Migrations:** `store/migrations/YYYYMMDDHHMM_description.sql`, using the current UTC time. Never edit a migration that has been merged; add a new one instead. A migration that rebuilds a table uses `PRAGMA defer_foreign_keys = ON`.
+- **Store:** query methods on `store.Queries`. Use `Store.InTx` for anything that writes several rows.
+- **HTTP API:** each area registers its routes in its own file through `register<Area>(mux)`, and maps its own errors to status codes there. Wrap routes that need the caller with `withFelhasznalo(handler)`. Add `httptest` tests for new routes.
+- **Gateways:** outbound integrations go behind interfaces in `gateway/`, with recording fakes in `gateway/gatewayfake`. Extend those; never call real APIs in tests.
+- **Off limits:** never touch Better Auth's tables (`user`, `session`, `account`, `verification`).
+
+**Frontend (`squadsync-fe/src/`)**
+- **Calling Go:** only from server code, through `lib/backend.ts`. Keep its types in sync with Go by hand.
+- **Reads and writes:** reads are side-effect free and wrapped in React `cache()`. Writes happen only in server actions or route handlers, never while rendering.
+- **Next.js 16:** check `squadsync-fe/node_modules/next/dist/docs/` for anything to do with `cacheComponents`, Suspense or route handlers. In route handlers, `unstable_rethrow` is needed inside `catch` blocks.
 
 ## Rules for implementation agents
 
