@@ -31,7 +31,7 @@ Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. Domain terms are
 **Backend (`squadsync-be/internal/`)**
 - **Use cases:** methods on `*app.App` in `app/<area>.go`. Area-specific errors live in that area's file. Only `ErrNotFound` and `ErrInvalidInput` live in `app.go`.
 - **Tests:** in package `app_test`, using `apptest.New(t)`, which provides the app, the store, a fake clock and recording fakes. Test behaviour through use cases.
-- **Migrations:** `store/migrations/YYYYMMDDHHMM_description.sql`, using the current UTC time. Never edit a migration that has been merged; add a new one instead. A migration that rebuilds a table uses `PRAGMA defer_foreign_keys = ON`.
+- **Migrations:** `store/migrations/YYYYMMDDHHMM_description.sql`. **Use the exact timestamp the coordinator gives you in your task prompt.** Parallel tickets created in the same minute collided once. If you weren't given one, use the current UTC time and check that it doesn't exist on `main`. If you need several migrations, add one minute for each. Never edit a migration that has been merged; add a new one instead. A migration that rebuilds a table uses `PRAGMA defer_foreign_keys = ON`.
 - **Store:** query methods on `store.Queries`. Use `Store.InTx` for anything that writes several rows.
 - **HTTP API:** each area registers its routes in its own file through `register<Area>(mux)`, and maps its own errors to status codes there. Wrap routes that need the caller with `withFelhasznalo(handler)`. Add `httptest` tests for new routes.
 - **Gateways:** outbound integrations go behind interfaces in `gateway/`, with recording fakes in `gateway/gatewayfake`. Extend those; never call real APIs in tests.
