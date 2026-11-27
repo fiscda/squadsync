@@ -173,7 +173,7 @@ func renderEsemeny(m gateway.EsemenyMessage) ([]*discordgo.MessageEmbed, []disco
 		}
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
 			Name:  truncate(name, maxEmbedFieldNameLength),
-			Value: allas(i),
+			Value: allas(i) + "\n" + szabadAznap(i),
 		})
 	}
 	if confirmed {

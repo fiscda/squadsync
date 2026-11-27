@@ -20,6 +20,7 @@ import {
 import { CopyLink } from "./copy-link";
 import { LeaveControl, RenameForm, TagControls } from "./csoport-admin";
 import { EsemenySection } from "./esemeny-section";
+import { RaeresHeatmap } from "./raeres-heatmap";
 
 export default function CsoportPage({ params }: PageProps<"/csoportok/[id]">) {
   return (
@@ -61,6 +62,10 @@ async function Csoport({ csoportId }: { csoportId: string }) {
       )}
 
       <EsemenySection csoportId={csoport.id} />
+
+      <Suspense fallback={<p className="text-zinc-500">Betöltés…</p>}>
+        <RaeresHeatmap csoportId={csoport.id} />
+      </Suspense>
 
       <section className="flex flex-col gap-3">
         <h2 className="text-xl font-semibold">Tagok ({csoport.tags.length})</h2>
