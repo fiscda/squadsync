@@ -19,6 +19,18 @@ func switchKiegeszito(t *testing.T, h *apptest.Harness, felhasznaloID, esemenyID
 	}
 }
 
+// felszerelesOnly keeps just Felszereles of an Esemeny's Kiegeszitok, for
+// tests about the framework that shouldn't change with every new Kiegeszito.
+func felszerelesOnly(list []app.KiegeszitoAllapot) []app.KiegeszitoAllapot {
+	var out []app.KiegeszitoAllapot
+	for _, k := range list {
+		if k.Kind == domain.Felszereles {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
 func addTetel(t *testing.T, h *apptest.Harness, felhasznaloID, esemenyID, name string, quantity int) domain.Tetel {
 	t.Helper()
 	tetel, err := h.App.AddTetel(context.Background(), felhasznaloID, esemenyID, app.TetelInput{Name: name, Quantity: quantity})
@@ -99,7 +111,7 @@ func TestSwitchingAKiegeszitoOffHidesItsDataAndOnRestoresItUnchanged(t *testing.
 	if err := h.App.SetVallalas(ctx, "bela", d.ID, sator.ID, app.VallalasInput{Quantity: 1}); !errors.Is(err, app.ErrKiegeszitoOff) {
 		t.Fatalf("SetVallalas while off: err = %v, want ErrKiegeszitoOff", err)
 	}
-	got := detail(t, h, "bela", d.ID).Kiegeszitok
+	got := felszerelesOnly(detail(t, h, "bela", d.ID).Kiegeszitok)
 	if len(got) != 1 || got[0] != (app.KiegeszitoAllapot{Kind: domain.Felszereles, Enabled: false, Switchable: true}) {
 		t.Fatalf("kiegeszitok while off = %+v", got)
 	}
@@ -110,7 +122,7 @@ func TestSwitchingAKiegeszitoOffHidesItsDataAndOnRestoresItUnchanged(t *testing.
 	if fmt.Sprintf("%+v", after) != fmt.Sprintf("%+v", before) {
 		t.Fatalf("after switching back on = %+v, want it unchanged: %+v", after, before)
 	}
-	if got := detail(t, h, "bela", d.ID).Kiegeszitok; !got[0].Enabled {
+	if got := felszerelesOnly(detail(t, h, "bela", d.ID).Kiegeszitok); !got[0].Enabled {
 		t.Fatalf("kiegeszitok = %+v, want Felszereles on", got)
 	}
 }
@@ -127,19 +139,19 @@ func TestOnlyTheSzervezoSwitchesKiegeszitok(t *testing.T) {
 			t.Errorf("SetKiegeszito by %s: err = %v, want %v", who, err, want)
 		}
 	}
-	for _, kind := range []domain.KiegeszitoKind{"sorok", domain.Autok} { // Autok isn't built yet
+	for _, kind := range []domain.KiegeszitoKind{"sorok", domain.LejatszasiLista} { // LejatszasiLista isn't built yet
 		if err := h.App.SetKiegeszito(ctx, "anna", e.ID, kind, true); !errors.Is(err, app.ErrInvalidInput) {
 			t.Errorf("SetKiegeszito(%s): err = %v, want ErrInvalidInput", kind, err)
 		}
 	}
-	if got := detail(t, h, "anna", e.ID).Kiegeszitok; len(got) != 1 || got[0].Enabled {
+	if got := felszerelesOnly(detail(t, h, "anna", e.ID).Kiegeszitok); len(got) != 1 || got[0].Enabled {
 		t.Fatalf("kiegeszitok = %+v, want Felszereles off", got)
 	}
 	// Switching to the state it is in changes nothing.
 	switchKiegeszito(t, h, "anna", e.ID, domain.Felszereles, false)
 	switchKiegeszito(t, h, "anna", e.ID, domain.Felszereles, true)
 	switchKiegeszito(t, h, "anna", e.ID, domain.Felszereles, true)
-	if got := detail(t, h, "anna", e.ID).Kiegeszitok; !got[0].Enabled {
+	if got := felszerelesOnly(detail(t, h, "anna", e.ID).Kiegeszitok); !got[0].Enabled {
 		t.Fatalf("kiegeszitok = %+v, want Felszereles on", got)
 	}
 }
@@ -153,7 +165,7 @@ func TestNothingCanBeSwitchedOnceElmaradt(t *testing.T) {
 			t.Fatalf("SetKiegeszito(%v) once Elmaradt: err = %v, want ErrKiegeszitoLocked", on, err)
 		}
 	}
-	if got := detail(t, h, "anna", d.ID).Kiegeszitok; !got[0].Enabled || got[0].Switchable {
+	if got := felszerelesOnly(detail(t, h, "anna", d.ID).Kiegeszitok); !got[0].Enabled || got[0].Switchable {
 		t.Fatalf("kiegeszitok = %+v, want Felszereles on and not switchable", got)
 	}
 }
@@ -167,7 +179,7 @@ func TestAKiegeszitoCanVetoBeingSwitchedOff(t *testing.T) {
 	if !errors.Is(err, app.ErrKiegeszitoInUse) {
 		t.Fatalf("switching off: err = %v, want the veto", err)
 	}
-	if got := detail(t, h, "anna", d.ID).Kiegeszitok; !got[0].Enabled {
+	if got := felszerelesOnly(detail(t, h, "anna", d.ID).Kiegeszitok); !got[0].Enabled {
 		t.Fatalf("kiegeszitok = %+v, want Felszereles still on", got)
 	}
 
@@ -363,7 +375,7 @@ func TestAKiegeszitoCanAllowSwitchingInOtherStates(t *testing.T) {
 
 	h.App.SetSwitchable(domain.Felszereles, func(e domain.Esemeny) bool { return e.Allapot != domain.Elmaradt })
 
-	if got := detail(t, h, "anna", d.ID).Kiegeszitok; !got[0].Switchable {
+	if got := felszerelesOnly(detail(t, h, "anna", d.ID).Kiegeszitok); !got[0].Switchable {
 		t.Fatalf("kiegeszitok = %+v, want Felszereles switchable", got)
 	}
 	switchKiegeszito(t, h, "anna", d.ID, domain.Felszereles, false)

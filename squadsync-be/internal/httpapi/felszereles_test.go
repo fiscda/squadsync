@@ -35,12 +35,28 @@ type felszerelesResp struct {
 	CanClaim    bool     `json:"canClaim"`
 }
 
+// felszerelesKiegeszito is Felszereles among an Esemeny's Kiegeszitok.
+func felszerelesKiegeszito(t *testing.T, r kiegeszitokResp) struct {
+	Kind       string `json:"kind"`
+	Enabled    bool   `json:"enabled"`
+	Switchable bool   `json:"switchable"`
+} {
+	t.Helper()
+	for _, k := range r.Kiegeszitok {
+		if k.Kind == "felszereles" {
+			return k
+		}
+	}
+	t.Fatalf("kiegeszitok = %+v, want Felszereles among them", r.Kiegeszitok)
+	panic("unreachable")
+}
+
 func TestSwitchingKiegeszitokOverHTTP(t *testing.T) {
 	api, esemenyID, _ := lifecycleSetup(t)
 	path := "/esemeny/" + esemenyID + "/kiegeszito/felszereles"
 
 	d := decode[kiegeszitokResp](t, call(t, api, http.MethodGet, "/esemeny/"+esemenyID, "", as("bela")))
-	if len(d.Kiegeszitok) != 1 || d.Kiegeszitok[0].Kind != "felszereles" || d.Kiegeszitok[0].Enabled || !d.Kiegeszitok[0].Switchable {
+	if f := felszerelesKiegeszito(t, d); f.Enabled || !f.Switchable {
 		t.Fatalf("kiegeszitok = %+v, want Felszereles off and switchable", d.Kiegeszitok)
 	}
 	expectStatus(t, call(t, api, http.MethodGet, "/esemeny/"+esemenyID+"/felszereles", "", as("bela")), http.StatusConflict)
@@ -52,7 +68,7 @@ func TestSwitchingKiegeszitokOverHTTP(t *testing.T) {
 	expectStatus(t, call(t, api, http.MethodPut, path, `{"enabled":true}`, as("anna")), http.StatusNoContent)
 
 	d = decode[kiegeszitokResp](t, call(t, api, http.MethodGet, "/esemeny/"+esemenyID, "", as("bela")))
-	if !d.Kiegeszitok[0].Enabled {
+	if !felszerelesKiegeszito(t, d).Enabled {
 		t.Fatalf("kiegeszitok = %+v, want Felszereles on", d.Kiegeszitok)
 	}
 
