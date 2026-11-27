@@ -36,15 +36,30 @@ func isTag(t *testing.T, h *apptest.Harness, felhasznaloID, csoportID string) bo
 	return err == nil
 }
 
-// insertEsemeny stores an Esemeny of the Szervezo in the given state.
+// insertEsemeny stores an Esemeny of the Szervezo in the given state. It
+// starts in Egyeztetes with one Idopont, which is the confirmed one in
+// Veglegesitve and Lezajlott (the database requires one there).
 func insertEsemeny(t *testing.T, h *apptest.Harness, csoportID, szervezoID string, allapot domain.Allapot) {
 	t.Helper()
-	err := h.Store.InsertEsemeny(context.Background(), domain.Esemeny{
-		ID: "esemeny-" + string(allapot) + "-" + szervezoID, CsoportID: csoportID, Title: "Játék",
-		SzervezoID: szervezoID, Allapot: allapot, CreatedAt: apptest.Start,
+	ctx := context.Background()
+	id := "esemeny-" + string(allapot) + "-" + szervezoID
+	err := h.Store.InsertEsemeny(ctx, domain.Esemeny{
+		ID: id, CsoportID: csoportID, Title: "Játék",
+		SzervezoID: szervezoID, Allapot: domain.Egyeztetes, CreatedAt: apptest.Start,
 	})
 	if err != nil {
 		t.Fatalf("InsertEsemeny: %v", err)
+	}
+	idopont := domain.Idopont{ID: id + "-idopont", EsemenyID: id, Start: apptest.Start, AddedBy: szervezoID, CreatedAt: apptest.Start}
+	if err := h.Store.InsertIdopont(ctx, idopont); err != nil {
+		t.Fatalf("InsertIdopont: %v", err)
+	}
+	confirmed := ""
+	if allapot == domain.Veglegesitve || allapot == domain.Lezajlott {
+		confirmed = idopont.ID
+	}
+	if err := h.Store.UpdateEsemenyAllapot(ctx, id, allapot, confirmed); err != nil {
+		t.Fatalf("UpdateEsemenyAllapot: %v", err)
 	}
 }
 
