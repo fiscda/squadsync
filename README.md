@@ -31,6 +31,8 @@ Login asks only for the `identify` and `email` scopes. Discord accounts register
 
 Go runs without the bot when `DISCORD_BOT_TOKEN` is empty, so you can skip this until you work on Discord features.
 
+The bot connects in the background. If Discord can't be reached when Go starts (an outage, no network, a wrong token), Go logs the error and keeps retrying with backoff, from 5 seconds up to every 5 minutes, while the internal API keeps working. Once connected, it reconnects by itself.
+
 1. In the same application, open **Bot** in the sidebar. Click **Reset Token** and copy the token into `DISCORD_BOT_TOKEN`.
    - No privileged gateway intents are needed: leave **Presence**, **Server Members** and **Message Content** off.
    - Optionally, turn off **Public Bot** so only you can add it to servers.
@@ -115,7 +117,7 @@ make lint   # cd squadsync-fe && bun run lint && bunx tsc --noEmit
 | `internal/domain` | Plain domain types (`Felhasznalo`, `DiscordAccount`). |
 | `internal/store` | SQLite: open (WAL, busy timeout, `BEGIN IMMEDIATE`), embedded migrations (`migrations/`) and queries. Use `Store.InTx` for transactions. |
 | `internal/httpapi` | The thin internal HTTP API. A global middleware checks the secret, and `withFelhasznalo` requires the Felhasználó id on routes that act for one. Each area registers its routes in its own file with `register<Area>(mux)`. |
-| `internal/bot` | The Discord bot: a thin adapter like `httpapi`. Its `Router` resolves every interaction to a Felhasználó, then routes slash commands by name and buttons and modals by custom-id prefix (`name:arg:arg`). See the package comment for how to add a handler. `bot.Messenger` is the real `gateway.DiscordMessenger`. |
+| `internal/bot` | The Discord bot: a thin adapter like `httpapi`. Its `Router` resolves every interaction to a Felhasználó, then routes slash commands by name and buttons and modals by custom-id prefix (`name:arg:arg`). Handlers that may exceed Discord's 3-second limit return a deferred reply. See the package comment for how to add a handler. `bot.Messenger` is the real `gateway.DiscordMessenger`. |
 | `internal/gateway` | Outbound interfaces: Discord messaging, Google Calendar and Spotify. |
 | `internal/gateway/gatewayfake` | Recording fakes of the gateways, for tests. |
 | `internal/clock` | The `Clock` interface, `clock.System` and the controllable `clock.Fake`. |

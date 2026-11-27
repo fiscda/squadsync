@@ -116,11 +116,9 @@ func run(log *slog.Logger, args []string) error {
 			Log:         log,
 			ChannelName: bot.ChannelNameFromCache(session),
 		})
-		closeBot, err := bot.Start(ctx, session, router, cfg.devGuildID, log)
-		if err != nil {
-			return err
-		}
-		defer closeBot()
+		// Connects in the background: a Discord outage never stops the API.
+		stopBot := bot.Start(ctx, session, router, cfg.devGuildID, log)
+		defer stopBot()
 	}
 
 	// Localhost only: Next.js is the sole public surface (ADR-0004).

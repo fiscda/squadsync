@@ -24,6 +24,7 @@ const (
 	csatornaNotInGuild = "Ezt egy szerver csatornájában futtasd: azt a csatornát kapcsolom a csoporthoz."
 	csatornaNotAdmin   = "Csak a csoport adminja kapcsolhat csatornát a csoporthoz."
 	csatornaNotFound   = "Nem találom ezt a csoportot. Válassz a listából egy csoportot, ahol admin vagy."
+	csatornaTaken      = "Ez a csatorna már egy másik csoporthoz tartozik. Előbb annak egy adminja válassza le a csoport weboldalán."
 	csatornaLinked     = "Kész! A(z) **%s** csoport bejelentései mostantól ebbe a csatornába érkeznek."
 )
 
@@ -47,14 +48,14 @@ func (r *Router) csatornaCommand() Command {
 	}
 }
 
-func (r *Router) linkCsatorna(ctx context.Context, req Request) (*discordgo.InteractionResponse, error) {
+func (r *Router) linkCsatorna(ctx context.Context, req Request) (Reply, error) {
 	i := req.Interaction
 	if i.GuildID == "" {
-		return Ephemeral(csatornaNotInGuild), nil
+		return ephemeral(csatornaNotInGuild), nil
 	}
 	csoportID := optionValue(i.ApplicationCommandData().Options, csatornaOptionName)
 
-	_, err := r.app.LinkCsatorna(ctx, req.Felhasznalo.ID, app.LinkCsatornaInput{
+	linked, err := r.app.LinkCsatorna(ctx, req.Felhasznalo.ID, app.LinkCsatornaInput{
 		CsoportID:   csoportID,
 		GuildID:     i.GuildID,
 		ChannelID:   i.ChannelID,
@@ -62,27 +63,24 @@ func (r *Router) linkCsatorna(ctx context.Context, req Request) (*discordgo.Inte
 	})
 	switch {
 	case errors.Is(err, app.ErrNotAdmin):
-		return Ephemeral(csatornaNotAdmin), nil
+		return ephemeral(csatornaNotAdmin), nil
 	case errors.Is(err, app.ErrNotFound):
-		return Ephemeral(csatornaNotFound), nil
+		return ephemeral(csatornaNotFound), nil
+	case errors.Is(err, app.ErrCsatornaTaken):
+		return ephemeral(csatornaTaken), nil
 	case err != nil:
-		return nil, err
+		return Reply{}, err
 	}
-
-	csoport, err := r.app.Csoport(ctx, req.Felhasznalo.ID, csoportID)
-	if err != nil {
-		return nil, err
-	}
-	return Public(fmt.Sprintf(csatornaLinked, csoport.Name)), nil
+	return public(fmt.Sprintf(csatornaLinked, linked.Csoport.Name)), nil
 }
 
 // csatornaCsoportChoices offers the Csoports where the caller is Admin,
 // filtered by what they've typed so far.
-func (r *Router) csatornaCsoportChoices(ctx context.Context, req Request) (*discordgo.InteractionResponse, error) {
+func (r *Router) csatornaCsoportChoices(ctx context.Context, req Request) (Reply, error) {
 	typed := strings.ToLower(strings.TrimSpace(optionValue(req.Interaction.ApplicationCommandData().Options, csatornaOptionName)))
 	csoportok, err := r.app.AdminCsoportokOf(ctx, req.Felhasznalo.ID)
 	if err != nil {
-		return nil, err
+		return Reply{}, err
 	}
 	var choices []*discordgo.ApplicationCommandOptionChoice
 	for _, c := range csoportok {
@@ -93,7 +91,7 @@ func (r *Router) csatornaCsoportChoices(ctx context.Context, req Request) (*disc
 			choices = append(choices, &discordgo.ApplicationCommandOptionChoice{Name: c.Name, Value: c.ID})
 		}
 	}
-	return AutocompleteChoices(choices), nil
+	return autocomplete(choices), nil
 }
 
 // optionValue returns the string value of the named option, or "".

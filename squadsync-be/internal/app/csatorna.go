@@ -2,12 +2,17 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"squadsync-be/internal/domain"
 	"squadsync-be/internal/store"
 )
+
+// ErrCsatornaTaken means the channel is already linked to another Csoport.
+// A channel belongs to at most one Csoport.
+var ErrCsatornaTaken = errors.New("channel already linked to another csoport")
 
 // LinkCsatornaInput names the Discord channel to link to a Csoport.
 type LinkCsatornaInput struct {
@@ -18,33 +23,54 @@ type LinkCsatornaInput struct {
 	ChannelName string
 }
 
+// LinkedCsatorna is the outcome of linking a channel.
+type LinkedCsatorna struct {
+	Csoport  domain.Csoport
+	Csatorna domain.Csatorna
+}
+
 // LinkCsatorna links a Discord channel to a Csoport. A Csoport has at most
-// one linked channel, so linking again replaces the previous one. Only an
-// Admin may do it: another Tag gets ErrNotAdmin, anyone else ErrNotFound.
-func (a *App) LinkCsatorna(ctx context.Context, felhasznaloID string, in LinkCsatornaInput) (domain.Csatorna, error) {
+// one linked channel, so linking again replaces the previous one. A channel
+// belongs to at most one Csoport: one linked elsewhere gives
+// ErrCsatornaTaken. Only an Admin may link: another Tag gets ErrNotAdmin,
+// anyone else ErrNotFound.
+func (a *App) LinkCsatorna(ctx context.Context, felhasznaloID string, in LinkCsatornaInput) (LinkedCsatorna, error) {
 	in.GuildID = strings.TrimSpace(in.GuildID)
 	in.ChannelID = strings.TrimSpace(in.ChannelID)
 	if in.GuildID == "" || in.ChannelID == "" {
-		return domain.Csatorna{}, fmt.Errorf("%w: a csatorna needs a guild id and a channel id", ErrInvalidInput)
+		return LinkedCsatorna{}, fmt.Errorf("%w: a csatorna needs a guild id and a channel id", ErrInvalidInput)
 	}
-	c := domain.Csatorna{
+	result := LinkedCsatorna{Csatorna: domain.Csatorna{
 		CsoportID:   in.CsoportID,
 		GuildID:     in.GuildID,
 		ChannelID:   in.ChannelID,
 		ChannelName: strings.TrimSpace(in.ChannelName),
 		LinkedBy:    felhasznaloID,
 		LinkedAt:    a.clock.Now(),
-	}
+	}}
 	err := a.store.InTx(ctx, func(q store.Queries) error {
 		if err := requireAdmin(ctx, q, in.CsoportID, felhasznaloID); err != nil {
 			return err
 		}
-		return q.UpsertCsatorna(ctx, c)
+		owner, err := q.FindCsoportIDOfChannel(ctx, in.ChannelID)
+		if err == nil && owner != in.CsoportID {
+			return ErrCsatornaTaken
+		}
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+		if result.Csoport, err = q.FindCsoport(ctx, in.CsoportID); err != nil {
+			return notFound(err)
+		}
+		if err := q.DeleteCsatorna(ctx, in.CsoportID); err != nil {
+			return err
+		}
+		return q.InsertCsatorna(ctx, result.Csatorna)
 	})
 	if err != nil {
-		return domain.Csatorna{}, err
+		return LinkedCsatorna{}, err
 	}
-	return c, nil
+	return result, nil
 }
 
 // UnlinkCsatorna removes the Csoport's linked channel. Only an Admin may do

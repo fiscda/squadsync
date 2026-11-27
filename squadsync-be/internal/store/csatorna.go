@@ -7,24 +7,32 @@ import (
 	"squadsync-be/internal/domain"
 )
 
-// UpsertCsatorna links the channel to its Csoport, replacing any channel
-// linked before.
-func (q Queries) UpsertCsatorna(ctx context.Context, c domain.Csatorna) error {
+// InsertCsatorna links the channel to its Csoport. The Csoport must have no
+// linked channel yet, and the channel no Csoport.
+func (q Queries) InsertCsatorna(ctx context.Context, c domain.Csatorna) error {
 	_, err := q.db.ExecContext(ctx,
 		`INSERT INTO csatorna (csoport_id, guild_id, channel_id, channel_name, linked_by, linked_at)
-		 VALUES (?, ?, ?, ?, ?, ?)
-		 ON CONFLICT (csoport_id) DO UPDATE SET
-		     guild_id = excluded.guild_id,
-		     channel_id = excluded.channel_id,
-		     channel_name = excluded.channel_name,
-		     linked_by = excluded.linked_by,
-		     linked_at = excluded.linked_at`,
+		 VALUES (?, ?, ?, ?, ?, ?)`,
 		c.CsoportID, c.GuildID, c.ChannelID, c.ChannelName, c.LinkedBy, formatTime(c.LinkedAt),
 	)
 	if err != nil {
-		return fmt.Errorf("upsert csatorna: %w", err)
+		return fmt.Errorf("insert csatorna: %w", err)
 	}
 	return nil
+}
+
+// FindCsoportIDOfChannel returns the id of the Csoport the channel is linked
+// to, or ErrNotFound.
+func (q Queries) FindCsoportIDOfChannel(ctx context.Context, channelID string) (string, error) {
+	var id string
+	err := q.db.QueryRowContext(ctx, `SELECT csoport_id FROM csatorna WHERE channel_id = ?`, channelID).Scan(&id)
+	if isNoRows(err) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("find csoport of channel: %w", err)
+	}
+	return id, nil
 }
 
 // FindCsatorna returns the channel linked to the Csoport, or ErrNotFound.

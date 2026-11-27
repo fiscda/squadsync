@@ -2,6 +2,7 @@ package bot_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -99,7 +100,7 @@ func TestUnknownDiscordAccountGetsOnlyALoginLink(t *testing.T) {
 	w := newWorld(t)
 	ctx := context.Background()
 
-	resp := w.router.Route(ctx, csatorna("d-stranger", w.csoport.ID, discordgo.InteractionApplicationCommand))
+	resp := w.router.Route(ctx, csatorna("d-stranger", w.csoport.ID, discordgo.InteractionApplicationCommand)).Response
 	expectEphemeral(t, resp, "Ehhez be kell lépned: "+loginURL)
 	if got := w.csatorna(t); got != nil {
 		t.Fatalf("unknown account linked a channel: %+v", got)
@@ -111,9 +112,9 @@ func TestUnknownDiscordAccountGetsOnlyALoginLink(t *testing.T) {
 		User: &discordgo.User{ID: "d-stranger"},
 		Data: discordgo.MessageComponentInteractionData{CustomID: "valami:1"},
 	}
-	expectEphemeral(t, w.router.Route(ctx, button), "Ehhez be kell lépned: "+loginURL)
+	expectEphemeral(t, w.router.Route(ctx, button).Response, "Ehhez be kell lépned: "+loginURL)
 
-	auto := w.router.Route(ctx, csatorna("d-stranger", "", discordgo.InteractionApplicationCommandAutocomplete))
+	auto := w.router.Route(ctx, csatorna("d-stranger", "", discordgo.InteractionApplicationCommandAutocomplete)).Response
 	if auto.Type != discordgo.InteractionApplicationCommandAutocompleteResult || len(auto.Data.Choices) != 0 {
 		t.Fatalf("autocomplete for a stranger = %+v, want no choices", auto.Data)
 	}
@@ -122,7 +123,7 @@ func TestUnknownDiscordAccountGetsOnlyALoginLink(t *testing.T) {
 func TestAdminLinksTheChannelWithCsatorna(t *testing.T) {
 	w := newWorld(t)
 
-	resp := w.router.Route(context.Background(), csatorna("d-anna", w.csoport.ID, discordgo.InteractionApplicationCommand))
+	resp := w.router.Route(context.Background(), csatorna("d-anna", w.csoport.ID, discordgo.InteractionApplicationCommand)).Response
 	if resp.Data == nil || resp.Data.Flags&discordgo.MessageFlagsEphemeral != 0 || !strings.Contains(resp.Data.Content, "Péntek esték") {
 		t.Fatalf("reply = %+v, want a public confirmation naming the Csoport", resp.Data)
 	}
@@ -132,17 +133,36 @@ func TestAdminLinksTheChannelWithCsatorna(t *testing.T) {
 	}
 }
 
+func TestChannelOfAnotherCsoportIsRefusedByCsatorna(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	other, err := w.h.App.CreateCsoport(ctx, "anna", "Túrák")
+	if err != nil {
+		t.Fatalf("CreateCsoport: %v", err)
+	}
+	w.router.Route(ctx, csatorna("d-anna", w.csoport.ID, discordgo.InteractionApplicationCommand))
+
+	resp := w.router.Route(ctx, csatorna("d-anna", other.ID, discordgo.InteractionApplicationCommand)).Response
+	expectEphemeral(t, resp, "másik csoporthoz tartozik")
+
+	// Relinking the same Csoport is fine.
+	resp = w.router.Route(ctx, csatorna("d-anna", w.csoport.ID, discordgo.InteractionApplicationCommand)).Response
+	if resp.Data == nil || resp.Data.Flags&discordgo.MessageFlagsEphemeral != 0 {
+		t.Fatalf("relinking reply = %+v, want the public confirmation", resp.Data)
+	}
+}
+
 func TestNonAdminIsRefusedByCsatorna(t *testing.T) {
 	w := newWorld(t)
 
-	resp := w.router.Route(context.Background(), csatorna("d-bela", w.csoport.ID, discordgo.InteractionApplicationCommand))
+	resp := w.router.Route(context.Background(), csatorna("d-bela", w.csoport.ID, discordgo.InteractionApplicationCommand)).Response
 	expectEphemeral(t, resp, "Csak a csoport adminja")
 	if got := w.csatorna(t); got != nil {
 		t.Fatalf("a Tag linked a channel: %+v", got)
 	}
 
 	// Typing a name instead of picking from the list isn't a Csoport id.
-	resp = w.router.Route(context.Background(), csatorna("d-anna", "Péntek esték", discordgo.InteractionApplicationCommand))
+	resp = w.router.Route(context.Background(), csatorna("d-anna", "Péntek esték", discordgo.InteractionApplicationCommand)).Response
 	expectEphemeral(t, resp, "Nem találom ezt a csoportot")
 }
 
@@ -157,7 +177,7 @@ func TestCsatornaAutocompleteOffersOnlyAdminCsoports(t *testing.T) {
 		t.Fatalf("CreateCsoport: %v", err)
 	}
 
-	resp := w.router.Route(ctx, csatorna("d-bela", "TÚR", discordgo.InteractionApplicationCommandAutocomplete))
+	resp := w.router.Route(ctx, csatorna("d-bela", "TÚR", discordgo.InteractionApplicationCommandAutocomplete)).Response
 	if resp.Type != discordgo.InteractionApplicationCommandAutocompleteResult {
 		t.Fatalf("reply type = %v, want an autocomplete result", resp.Type)
 	}
@@ -175,24 +195,100 @@ func TestEveryCommandHasADefinition(t *testing.T) {
 	}
 }
 
-func TestComponentsAreRoutedByCustomIDWithTheirArgs(t *testing.T) {
-	w := newWorld(t)
-	var got bot.Request
-	w.router.Component("proba", func(_ context.Context, req bot.Request) (*discordgo.InteractionResponse, error) {
-		got = req
-		return bot.Ephemeral("ok"), nil
-	})
+// message is an immediate reply with the given text.
+func message(content string) bot.Reply {
+	return bot.Reply{Response: &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{Content: content, Flags: discordgo.MessageFlagsEphemeral},
+	}}
+}
 
-	button := &discordgo.Interaction{
+// button builds a button press by Bela with the given custom id.
+func button(customID string) *discordgo.Interaction {
+	return &discordgo.Interaction{
 		Type:   discordgo.InteractionMessageComponent,
 		Member: &discordgo.Member{User: &discordgo.User{ID: "d-bela"}},
-		Data:   discordgo.MessageComponentInteractionData{CustomID: bot.CustomID("proba", "idopont-1", "igen")},
+		Data:   discordgo.MessageComponentInteractionData{CustomID: customID},
 	}
-	expectEphemeral(t, w.router.Route(context.Background(), button), "ok")
+}
+
+func mustCustomID(t *testing.T, name string, args ...string) string {
+	t.Helper()
+	id, err := bot.CustomID(name, args...)
+	if err != nil {
+		t.Fatalf("CustomID: %v", err)
+	}
+	return id
+}
+
+func TestComponentsAreRoutedByCustomIDWithTheirArgs(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	var got bot.Request
+	w.router.Component("proba", func(_ context.Context, req bot.Request) (bot.Reply, error) {
+		got = req
+		return message("ok"), nil
+	})
+
+	expectEphemeral(t, w.router.Route(ctx, button(mustCustomID(t, "proba", "idopont-1", "igen"))).Response, "ok")
 	if got.Felhasznalo.ID != "bela" || len(got.Args) != 2 || got.Args[0] != "idopont-1" || got.Args[1] != "igen" {
 		t.Fatalf("request = %+v, want Béla with args [idopont-1 igen]", got)
 	}
 
-	button.Data = discordgo.MessageComponentInteractionData{CustomID: "ismeretlen:1"}
-	expectEphemeral(t, w.router.Route(context.Background(), button), "Ezt nem ismerem")
+	expectEphemeral(t, w.router.Route(ctx, button("ismeretlen:1")).Response, "Ezt nem ismerem")
+}
+
+func TestCustomIDRefusesSeparatorsAndLongIDs(t *testing.T) {
+	if id, err := bot.CustomID("proba", "a", "b"); err != nil || id != "proba:a:b" {
+		t.Fatalf("CustomID = %q, %v; want proba:a:b", id, err)
+	}
+	if _, err := bot.CustomID("proba", "a:b"); err == nil {
+		t.Fatal("an argument with ':' was accepted")
+	}
+	if _, err := bot.CustomID("proba", strings.Repeat("x", 94)); err != nil {
+		t.Fatalf("a 100-character id was refused: %v", err)
+	}
+	if _, err := bot.CustomID("proba", strings.Repeat("x", 95)); err == nil {
+		t.Fatal("a 101-character id was accepted")
+	}
+}
+
+func TestAPanickingHandlerGetsTheGenericError(t *testing.T) {
+	w := newWorld(t)
+	w.router.Component("panik", func(context.Context, bot.Request) (bot.Reply, error) {
+		panic("boom")
+	})
+	expectEphemeral(t, w.router.Route(context.Background(), button("panik")).Response, "Valami hiba történt")
+}
+
+func TestDeferredReplyIsCompletedByItsFollowup(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	deferred := &discordgo.InteractionResponse{Type: discordgo.InteractionResponseDeferredMessageUpdate}
+	w.router.Component("lassu", func(_ context.Context, req bot.Request) (bot.Reply, error) {
+		return bot.Reply{Response: deferred, Then: func(context.Context) (*discordgo.WebhookEdit, error) {
+			switch req.Args[0] {
+			case "hiba":
+				return nil, errors.New("spotify is down")
+			case "panik":
+				panic("boom")
+			}
+			done := "Kész, " + req.Felhasznalo.Name
+			return &discordgo.WebhookEdit{Content: &done}, nil
+		}}, nil
+	})
+
+	for arg, want := range map[string]string{
+		"ok":    "Kész, Béla",
+		"hiba":  "Valami hiba történt",
+		"panik": "Valami hiba történt",
+	} {
+		routed := w.router.Route(ctx, button(mustCustomID(t, "lassu", arg)))
+		if routed.Response != deferred || routed.Complete == nil {
+			t.Fatalf("%s: routed = %+v, want the deferred response and a completion", arg, routed)
+		}
+		if edit := routed.Complete(ctx); edit == nil || edit.Content == nil || !strings.Contains(*edit.Content, want) {
+			t.Fatalf("%s: completion = %+v, want content %q", arg, edit, want)
+		}
+	}
 }

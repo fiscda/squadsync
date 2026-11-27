@@ -67,8 +67,8 @@ func TestAdminLinksAChannelToTheCsoport(t *testing.T) {
 		CsoportID: c.ID, GuildID: "guild-1", ChannelID: "chan-1", ChannelName: "altalanos",
 		LinkedBy: "anna", LinkedAt: apptest.Start,
 	}
-	if linked != want {
-		t.Fatalf("LinkCsatorna = %+v, want %+v", linked, want)
+	if linked.Csatorna != want || linked.Csoport.Name != "Péntek esték" {
+		t.Fatalf("LinkCsatorna = %+v, want %+v in Péntek esték", linked, want)
 	}
 	// Every Tag sees the linked channel, not only Admins.
 	if got := csatornaOf(t, h, "bela", c.ID); got == nil || *got != want {
@@ -142,6 +142,40 @@ func TestAdminUnlinksTheChannel(t *testing.T) {
 	}
 	if err := h.App.UnlinkCsatorna(ctx, "anna", c.ID); err != nil {
 		t.Fatalf("unlinking again: %v", err)
+	}
+}
+
+func TestAChannelBelongsToOneCsoport(t *testing.T) {
+	h := apptest.New(t)
+	ctx := context.Background()
+	c := csoportWithTag(t, h)
+	other, err := h.App.CreateCsoport(ctx, "anna", "Túrák")
+	if err != nil {
+		t.Fatalf("CreateCsoport: %v", err)
+	}
+	in := app.LinkCsatornaInput{CsoportID: c.ID, GuildID: "guild-1", ChannelID: "chan-1"}
+	if _, err := h.App.LinkCsatorna(ctx, "anna", in); err != nil {
+		t.Fatalf("LinkCsatorna: %v", err)
+	}
+	// Relinking the same channel to the same Csoport is fine.
+	if _, err := h.App.LinkCsatorna(ctx, "anna", in); err != nil {
+		t.Fatalf("relinking the same channel: %v", err)
+	}
+
+	in.CsoportID = other.ID
+	if _, err := h.App.LinkCsatorna(ctx, "anna", in); !errors.Is(err, app.ErrCsatornaTaken) {
+		t.Fatalf("linking a taken channel: err = %v, want ErrCsatornaTaken", err)
+	}
+	if got := csatornaOf(t, h, "anna", other.ID); got != nil {
+		t.Fatalf("the other Csoport got Csatorna %+v", got)
+	}
+
+	// Once unlinked, the channel is free again.
+	if err := h.App.UnlinkCsatorna(ctx, "anna", c.ID); err != nil {
+		t.Fatalf("UnlinkCsatorna: %v", err)
+	}
+	if _, err := h.App.LinkCsatorna(ctx, "anna", in); err != nil {
+		t.Fatalf("linking a freed channel: %v", err)
 	}
 }
 
