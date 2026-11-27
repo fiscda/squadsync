@@ -238,6 +238,32 @@ func TestWhenTheLastTagLeavesTheCsoportJustHasNoTags(t *testing.T) {
 	}
 }
 
+func TestWhoeverJoinsACsoportWithNoTagsBecomesItsAdmin(t *testing.T) {
+	h := apptest.New(t)
+	ctx := context.Background()
+	c, m := csoportWithMeghivo(t, h)
+	addFelhasznalo(t, h, "bela", "Béla")
+	addFelhasznalo(t, h, "cecil", "Cecil")
+	if err := h.App.LeaveCsoport(ctx, "anna", c.ID); err != nil {
+		t.Fatalf("the lone Admin leaving: %v", err)
+	}
+
+	if _, err := h.App.JoinCsoport(ctx, "bela", m.Token); err != nil {
+		t.Fatalf("JoinCsoport: %v", err)
+	}
+	if d, err := h.App.Csoport(ctx, "bela", c.ID); err != nil || !d.Admin {
+		t.Fatalf("Csoport = %+v, %v, want Bela as Admin", d, err)
+	}
+
+	// Only the first one: the next to join is an ordinary Tag.
+	if _, err := h.App.JoinCsoport(ctx, "cecil", m.Token); err != nil {
+		t.Fatalf("JoinCsoport: %v", err)
+	}
+	if d, err := h.App.Csoport(ctx, "cecil", c.ID); err != nil || d.Admin {
+		t.Fatalf("Csoport = %+v, %v, want Cecil as an ordinary Tag", d, err)
+	}
+}
+
 func TestALeavingTagKeepsTheirVisszajelzesButItNoLongerCounts(t *testing.T) {
 	h := apptest.New(t)
 	ctx := context.Background()

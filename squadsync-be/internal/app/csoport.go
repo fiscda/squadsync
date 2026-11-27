@@ -155,9 +155,13 @@ func (a *App) RemoveTag(ctx context.Context, felhasznaloID, csoportID, targetID 
 }
 
 // LeaveCsoport ends the Felhasznalo's own Tag. Any Tag may leave; anyone else
-// gets ErrNotFound. The last Admin gets ErrLastAdmin unless they are the only
-// Tag, and a Szervezo of an active Esemeny ErrSzervezoOfActiveEsemeny. When
-// the last Tag leaves, the Csoport simply has no Tags. Their Visszajelzesek stay, but no longer count.
+// gets ErrNotFound.
+//
+// The last Admin gets ErrLastAdmin unless they are the only Tag, and a
+// Szervezo of an active Esemeny gets ErrSzervezoOfActiveEsemeny. When the
+// last Tag leaves, the Csoport simply has no Tags; the next Felhasznalo to
+// join it becomes its Admin (see JoinCsoport). The leaver's Visszajelzesek
+// stay, but no longer count.
 func (a *App) LeaveCsoport(ctx context.Context, felhasznaloID, csoportID string) error {
 	return a.store.InTx(ctx, func(q store.Queries) error {
 		return deleteTag(ctx, q, csoportID, felhasznaloID)
@@ -324,7 +328,8 @@ type JoinResult struct {
 }
 
 // JoinCsoport makes the Felhasznalo a Tag of the Csoport behind the link
-// token. A Felhasznalo who already is a Tag keeps their Tag, role included,
+// token. A Felhasznalo who joins a Csoport that has no Tags becomes its
+// Admin. A Felhasznalo who already is a Tag keeps their Tag, role included,
 // and gets the Csoport back even if the link has been revoked. Otherwise an
 // unknown token gives ErrNotFound and a revoked one ErrCsoportMeghivoRevoked.
 // An unknown Felhasznalo gives ErrFelhasznaloUnknown.
@@ -355,9 +360,16 @@ func (a *App) JoinCsoport(ctx context.Context, felhasznaloID, token string) (Joi
 			return ErrCsoportMeghivoRevoked
 		}
 		result.Joined = true
+		// A Csoport nobody is a Tag of has nobody to administer it, so
+		// whoever joins it first becomes its Admin.
+		tags, err := q.CountTags(ctx, csoport.ID)
+		if err != nil {
+			return err
+		}
 		return q.InsertTag(ctx, domain.Tag{
 			CsoportID:     csoport.ID,
 			FelhasznaloID: felhasznaloID,
+			Admin:         tags == 0,
 			CreatedAt:     a.clock.Now(),
 		})
 	})
