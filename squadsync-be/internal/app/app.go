@@ -32,6 +32,8 @@ type Deps struct {
 	Discord  gateway.DiscordMessenger
 	Calendar gateway.GoogleCalendar
 	Spotify  gateway.Spotify
+	// DiscordOAuth identifies Discord accounts being linked (ADR-0002).
+	DiscordOAuth gateway.DiscordOAuth
 }
 
 // App runs the use cases.
@@ -41,6 +43,8 @@ type App struct {
 	discord  gateway.DiscordMessenger
 	calendar gateway.GoogleCalendar
 	spotify  gateway.Spotify
+
+	discordOAuth gateway.DiscordOAuth
 }
 
 // New builds the application core.
@@ -51,5 +55,7 @@ func New(d Deps) *App {
 		discord:  d.Discord,
 		calendar: d.Calendar,
 		spotify:  d.Spotify,
+
+		discordOAuth: d.DiscordOAuth,
 	}
 }

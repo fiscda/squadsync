@@ -12,6 +12,7 @@ import (
 	"squadsync-be/internal/apptest"
 	"squadsync-be/internal/bot"
 	"squadsync-be/internal/domain"
+	"squadsync-be/internal/gateway"
 )
 
 const loginURL = "https://squadsync.example"
@@ -290,5 +291,23 @@ func TestDeferredReplyIsCompletedByItsFollowup(t *testing.T) {
 		if edit := routed.Complete(ctx); edit == nil || edit.Content == nil || !strings.Contains(*edit.Content, want) {
 			t.Fatalf("%s: completion = %+v, want content %q", arg, edit, want)
 		}
+	}
+}
+
+func TestALinkedDiscordAccountActsAsItsMainFelhasznalo(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	code := w.h.DiscordOAuth.Authorize("phone", gateway.DiscordIdentity{ID: "d-anna-phone", Name: "Anna telefon"})
+	if _, err := w.h.App.LinkDiscordAccount(ctx, "anna", code, "http://localhost:3000/fiok/discord/callback"); err != nil {
+		t.Fatalf("LinkDiscordAccount: %v", err)
+	}
+
+	// Only an Admin may link a channel: Anna's phone account is Anna.
+	resp := w.router.Route(ctx, csatorna("d-anna-phone", w.csoport.ID, discordgo.InteractionApplicationCommand)).Response
+	if resp.Data == nil || resp.Data.Flags&discordgo.MessageFlagsEphemeral != 0 {
+		t.Fatalf("reply = %+v, want the public confirmation", resp.Data)
+	}
+	if got := w.csatorna(t); got == nil || got.LinkedBy != "anna" {
+		t.Fatalf("Csatorna = %+v, want one linked by anna", got)
 	}
 }

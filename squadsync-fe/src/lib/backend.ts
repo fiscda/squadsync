@@ -100,6 +100,103 @@ export async function getFelhasznalo(
   }
 }
 
+// --- Discord accounts (ADR-0002) ---
+
+/** One of a Felhasználó's Discord accounts. */
+export type DiscordAccount = {
+  discordId: string;
+  /** The account's Discord name when it was recorded. May be empty. */
+  name: string;
+  /** The main account is the one that logs in to the web. */
+  main: boolean;
+  /** RFC 3339, UTC */
+  createdAt: string;
+};
+
+/** The Felhasználó's Discord accounts, the main one first. */
+export function listDiscordAccounts(
+  felhasznaloId: string,
+): Promise<DiscordAccount[]> {
+  return callBackend(felhasznaloId, "GET", "/felhasznalo/discord-account");
+}
+
+export type LinkOutcome =
+  | {
+      status: "linked";
+      account: DiscordAccount;
+      /** It already was theirs, so nothing changed. */
+      alreadyLinked: boolean;
+      /**
+       * The empty Felhasználó (and Better Auth user) the account was taken
+       * from, which Go removed; or "".
+       */
+      removedFelhasznaloId: string;
+    }
+  /** The account belongs to a Felhasználó with a Tag or other data. */
+  | { status: "in-use" }
+  /** Discord refused the code (expired, reused, wrong redirect URI). */
+  | { status: "code-rejected" };
+
+/**
+ * Finishes linking a further Discord account: Go exchanges the code from
+ * Discord's redirect with Discord, then records the link.
+ */
+export async function linkDiscordAccount(
+  felhasznaloId: string,
+  input: { code: string; redirectUri: string },
+): Promise<LinkOutcome> {
+  try {
+    const result = await callBackend<{
+      account: DiscordAccount;
+      alreadyLinked: boolean;
+      removedFelhasznaloId: string;
+    }>(felhasznaloId, "POST", "/felhasznalo/discord-account", input);
+    return { status: "linked", ...result };
+  } catch (err) {
+    if (err instanceof BackendError && err.status === 409) {
+      return { status: "in-use" };
+    }
+    if (err instanceof BackendError && err.status === 400) {
+      return { status: "code-rejected" };
+    }
+    throw err;
+  }
+}
+
+/**
+ * Unlinks one of the Felhasználó's extra Discord accounts. Go answers 409
+ * for the main account and 404 for one that isn't theirs.
+ */
+export async function unlinkDiscordAccount(
+  felhasznaloId: string,
+  discordId: string,
+): Promise<void> {
+  await callBackend<void>(
+    felhasznaloId,
+    "DELETE",
+    `/felhasznalo/discord-account/${encodeURIComponent(discordId)}`,
+  );
+}
+
+/** Whether a Discord account may log in to the web, and if not, why. */
+export type WebLoginCheck = {
+  allowed: boolean;
+  /** The refusal to show, naming the main account; "" when allowed. */
+  message: string;
+};
+
+/**
+ * Asks Go whether a Discord account may log in to the web. Runs during
+ * login, before any Felhasználó is known, so it sends only the secret.
+ */
+export function checkWebLogin(discordId: string): Promise<WebLoginCheck> {
+  return callBackend(
+    null,
+    "GET",
+    `/discord-account/${encodeURIComponent(discordId)}/web-login`,
+  );
+}
+
 // --- Csoport and Csoport-meghívó ---
 
 export type Csoport = {

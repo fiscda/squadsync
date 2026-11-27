@@ -14,6 +14,8 @@
 //	DISCORD_BOT_TOKEN    the bot's token; without it Go runs without the bot
 //	DISCORD_DEV_GUILD_ID register slash commands on this server only (optional)
 //	BETTER_AUTH_URL      public URL of the web app, for login links (required with the bot)
+//	DISCORD_CLIENT_ID    the Discord application's OAuth2 client id, for linking
+//	DISCORD_CLIENT_SECRET  and its secret; without both, linking is unavailable
 package main
 
 import (
@@ -50,6 +52,9 @@ type config struct {
 	botToken   string
 	devGuildID string
 	publicURL  string
+
+	discordClientID     string
+	discordClientSecret string
 }
 
 func main() {
@@ -99,12 +104,24 @@ func run(log *slog.Logger, args []string) error {
 		discord = bot.Messenger{Session: session}
 	}
 
+	var discordOAuth gateway.DiscordOAuth = gateway.Disabled{}
+	if cfg.discordClientID != "" && cfg.discordClientSecret != "" {
+		discordOAuth = &gateway.DiscordOAuthClient{
+			ClientID:     cfg.discordClientID,
+			ClientSecret: cfg.discordClientSecret,
+		}
+	} else {
+		log.Info("DISCORD_CLIENT_ID or DISCORD_CLIENT_SECRET is not set: linking Discord accounts is unavailable")
+	}
+
 	a := app.New(app.Deps{
 		Store:    s,
 		Clock:    clock.System{},
 		Discord:  discord,
 		Calendar: gateway.Disabled{},
 		Spotify:  gateway.Disabled{},
+
+		DiscordOAuth: discordOAuth,
 	})
 
 	if session == nil {
@@ -159,6 +176,9 @@ func loadConfig(migrateOnly bool) (config, error) {
 		botToken:   strings.TrimSpace(os.Getenv("DISCORD_BOT_TOKEN")),
 		devGuildID: strings.TrimSpace(os.Getenv("DISCORD_DEV_GUILD_ID")),
 		publicURL:  strings.TrimRight(strings.TrimSpace(os.Getenv("BETTER_AUTH_URL")), "/"),
+
+		discordClientID:     strings.TrimSpace(os.Getenv("DISCORD_CLIENT_ID")),
+		discordClientSecret: strings.TrimSpace(os.Getenv("DISCORD_CLIENT_SECRET")),
 	}
 	if cfg.dbPath == "" {
 		return config{}, errors.New("DATABASE_PATH is required")

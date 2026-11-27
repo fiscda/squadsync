@@ -21,6 +21,28 @@ type DiscordMessenger interface {
 	SendDM(ctx context.Context, discordID string, content string) error
 }
 
+// DiscordIdentity is the Discord account behind an OAuth authorization.
+type DiscordIdentity struct {
+	// ID is the Discord user id.
+	ID string
+	// Name is the account's display name (or its username if it has none).
+	Name string
+}
+
+// ErrDiscordCodeRejected means Discord refused an OAuth authorization code:
+// it was invalid, expired, already used, or issued for another redirect URI.
+var ErrDiscordCodeRejected = errors.New("gateway: discord rejected the authorization code")
+
+// DiscordOAuth finds out which Discord account authorized the app, for
+// linking a further Discord account to a Felhasznalo (ADR-0002).
+type DiscordOAuth interface {
+	// ExchangeCode exchanges an OAuth authorization code (scope identify)
+	// for the identity of the Discord account that granted it. redirectURI
+	// must be the one the authorization was started with. It fails with
+	// ErrDiscordCodeRejected when Discord refuses the code.
+	ExchangeCode(ctx context.Context, code, redirectURI string) (DiscordIdentity, error)
+}
+
 // CalendarEvent is one event in a Felhasznalo's dedicated "Squad Sync"
 // Google calendar (ADR-0005).
 type CalendarEvent struct {
@@ -55,6 +77,11 @@ type Disabled struct{}
 
 // SendDM implements DiscordMessenger.
 func (Disabled) SendDM(context.Context, string, string) error { return ErrNotConfigured }
+
+// ExchangeCode implements DiscordOAuth.
+func (Disabled) ExchangeCode(context.Context, string, string) (DiscordIdentity, error) {
+	return DiscordIdentity{}, ErrNotConfigured
+}
 
 // UpsertEvent implements GoogleCalendar.
 func (Disabled) UpsertEvent(context.Context, string, CalendarEvent) error {

@@ -22,10 +22,12 @@ Every developer uses their own test application.
 1. Open the [Discord Developer Portal](https://discord.com/developers/applications) and click **New Application**. Any name works, for example "Squad Sync (dev)".
 2. Open **OAuth2** in the sidebar.
 3. Copy the **Client ID**. Then click **Reset Secret** and copy the **Client Secret**.
-4. Under **Redirects**, add `http://localhost:3000/api/auth/callback/discord` and save.
-   - In production, add `https://<your domain>/api/auth/callback/discord` too.
+4. Under **Redirects**, add both of these and save:
+   - `http://localhost:3000/api/auth/callback/discord` (web login, Better Auth)
+   - `http://localhost:3000/fiok/discord/callback` (linking a further Discord account on `/fiok`)
+   - In production, add the same two paths on `https://<your domain>` too. Both are built from `BETTER_AUTH_URL`.
 
-Login asks only for the `identify` and `email` scopes. Discord accounts registered with only a phone number have no email, so they get a placeholder address on the reserved `.invalid` domain. The app never sends email.
+Login asks only for the `identify` and `email` scopes; linking asks only for `identify`. Discord accounts registered with only a phone number have no email, so they get a placeholder address on the reserved `.invalid` domain. The app never sends email.
 
 ### 1b. Add the bot (optional)
 
@@ -57,7 +59,7 @@ Fill in `.env`:
 | `BACKEND_PORT` | The port Go listens on, on `127.0.0.1`. The default is `8081`. |
 | `BETTER_AUTH_SECRET` | The output of `openssl rand -base64 32`. |
 | `BETTER_AUTH_URL` | `http://localhost:3000` |
-| `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` | The values from step 1. |
+| `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` | The values from step 1. Go uses them too, to exchange the code when a Felhasználó links a further Discord account. |
 | `DISCORD_BOT_TOKEN`, `DISCORD_DEV_GUILD_ID` | Optional: the values from step 1b. |
 
 The Makefile exports everything in `.env` to both servers, so there's no separate `.env` inside `squadsync-fe/` or `squadsync-be/`.
@@ -91,7 +93,7 @@ make migrate-fe    # Better Auth CLI: bun run auth:migrate (in squadsync-fe/)
 ## Checks
 
 ```sh
-make test   # cd squadsync-be && go test ./...
+make test   # cd squadsync-be && go test ./...; cd squadsync-fe && bun test
 make lint   # cd squadsync-fe && bun run lint && bunx tsc --noEmit
 ```
 
@@ -106,7 +108,13 @@ make lint   # cd squadsync-fe && bun run lint && bunx tsc --noEmit
 3. **First login.** When Better Auth creates the Discord account of a new user, a database hook (`squadsync-fe/src/lib/auth.ts`) calls `POST /felhasznalo/first-login` with the Discord user id. Go creates the Felhasználó and records the main Discord account. The call is idempotent.
    - If that call failed (for example, Go was down), it's repeated by `ensureFelhasznalo` (`squadsync-fe/src/lib/felhasznalo.ts`). This runs in the `/login/complete` route handler, where Better Auth redirects after every login. If the Felhasználó is still missing, the page offers a retry button, which calls a server action.
    - Rendering never mutates. Pages only read, through `getCurrentFelhasznalo`.
-4. **Linking.** Better Auth's own account linking is turned off. Linking more Discord accounts belongs to Go (ADR-0002).
+4. **Linking.** Better Auth's own account linking is turned off. Linking more Discord accounts belongs to Go (ADR-0002):
+   - On `/fiok`, the "Másik Discord fiók kapcsolása" button posts to `/fiok/discord/kapcsolas`. That route stores a random `state` in an httpOnly cookie bound to the Felhasználó, and sends the browser to Discord (scope `identify`, `prompt=consent`, so you can switch to the other account with "Not you?").
+   - Discord redirects to `/fiok/discord/callback`. The route checks the state, then forwards the code and the redirect URI to `POST /felhasznalo/discord-account`. Go exchanges the code with Discord (`gateway.DiscordOAuth`) and records the link.
+   - An account of a Felhasználó with a Tag or any other data is refused ("Ez a fiók már használatban van."). One whose Felhasználó has nothing else (they only logged in once) is moved over, that empty Felhasználó is removed, and Next.js ends its Better Auth sessions.
+   - Extra accounts can be unlinked on `/fiok`; the main one can't.
+5. **Web login with a linked account is refused.** Better Auth's `user.validateUserInfo` (`squadsync-fe/src/lib/web-login-guard.ts`) asks Go's secret-only `GET /discord-account/{discordId}/web-login`. It runs before Better Auth creates a user and before it creates the session of an existing one, so a linked account gets neither. The refusal ("Ez a fiók X-hez van kapcsolva, lépj be azzal.") is shown on the home page.
+6. **DMs** to a Felhasználó go to every linked account: use `App.SendDMToFelhasznalo`.
 
 ## Go backend layout
 
@@ -118,7 +126,7 @@ make lint   # cd squadsync-fe && bun run lint && bunx tsc --noEmit
 | `internal/store` | SQLite: open (WAL, busy timeout, `BEGIN IMMEDIATE`), embedded migrations (`migrations/`) and queries. Use `Store.InTx` for transactions. |
 | `internal/httpapi` | The thin internal HTTP API. A global middleware checks the secret, and `withFelhasznalo` requires the Felhasználó id on routes that act for one. Each area registers its routes in its own file with `register<Area>(mux)`. |
 | `internal/bot` | The Discord bot: a thin adapter like `httpapi`. Its `Router` resolves every interaction to a Felhasználó, then routes slash commands by name and buttons and modals by custom-id prefix (`name:arg:arg`). Handlers that may exceed Discord's 3-second limit return a deferred reply. See the package comment for how to add a handler. `bot.Messenger` is the real `gateway.DiscordMessenger`. |
-| `internal/gateway` | Outbound interfaces: Discord messaging, Google Calendar and Spotify. |
+| `internal/gateway` | Outbound interfaces: Discord messaging, Discord OAuth (for linking, with the real `DiscordOAuthClient`), Google Calendar and Spotify. |
 | `internal/gateway/gatewayfake` | Recording fakes of the gateways, for tests. |
 | `internal/clock` | The `Clock` interface, `clock.System` and the controllable `clock.Fake`. |
 | `internal/apptest` | The test harness. `apptest.New(t)` gives an `App` on a temporary SQLite file with the real migrations, a fake clock and the recording fakes. |
