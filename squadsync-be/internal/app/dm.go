@@ -13,9 +13,19 @@ import (
 
 // dmAccounts returns the Discord ids to DM the Felhasznalo on about the
 // Csoport: every linked account. This is the one place to skip a Tag who
-// muted the Csoport. csoportID is unused until #11 adds DM muting per Tag;
-// every caller already passes it so that #11 only changes this function.
+// muted the Csoport. A DM that belongs to no Csoport passes an empty
+// csoportID and is never muted.
 func (a *App) dmAccounts(ctx context.Context, csoportID, felhasznaloID string) []string {
+	if csoportID != "" {
+		muted, err := a.mutedCsoport(ctx, csoportID, felhasznaloID)
+		if err != nil {
+			a.log.Error("check dm muting", "felhasznalo", felhasznaloID, "csoport", csoportID, "err", err)
+			return nil
+		}
+		if muted {
+			return nil
+		}
+	}
 	accounts, err := a.store.ListDiscordAccounts(ctx, felhasznaloID)
 	if err != nil {
 		a.log.Error("list discord accounts for a dm", "felhasznalo", felhasznaloID, "csoport", csoportID, "err", err)

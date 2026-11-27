@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import type { CsoportDetail } from "@/lib/backend";
 import { getCsoport, getCsoportMeghivok } from "@/lib/csoport";
+import { requireFelhasznalo } from "@/lib/felhasznalo";
 import {
   buttonClass,
   cardClass,
@@ -13,9 +14,11 @@ import {
 import {
   createMeghivoAction,
   revokeMeghivoAction,
+  setMutedAction,
   unlinkCsatornaAction,
 } from "../actions";
 import { CopyLink } from "./copy-link";
+import { LeaveControl, RenameForm, TagControls } from "./csoport-admin";
 import { EsemenySection } from "./esemeny-section";
 
 export default function CsoportPage({ params }: PageProps<"/csoportok/[id]">) {
@@ -40,6 +43,7 @@ async function Csoport({ csoportId }: { csoportId: string }) {
     // Not a Tag, or no such Csoport: the same answer either way.
     notFound();
   }
+  const felhasznalo = await requireFelhasznalo();
 
   return (
     <>
@@ -52,6 +56,10 @@ async function Csoport({ csoportId }: { csoportId: string }) {
         </p>
       </div>
 
+      {csoport.admin && (
+        <RenameForm csoportId={csoport.id} name={csoport.name} />
+      )}
+
       <EsemenySection csoportId={csoport.id} />
 
       <section className="flex flex-col gap-3">
@@ -60,12 +68,23 @@ async function Csoport({ csoportId }: { csoportId: string }) {
           {csoport.tags.map((tag) => (
             <li
               key={tag.felhasznaloId}
-              className={`${cardClass} flex items-center justify-between gap-4`}
+              className={`${cardClass} flex flex-col gap-3`}
             >
-              <span className="font-medium">{tag.name}</span>
-              <span className="text-sm text-zinc-500">
-                {tag.admin ? "Admin" : `Tag ${formatDate(tag.createdAt)} óta`}
-              </span>
+              <div className="flex items-center justify-between gap-4">
+                <span className="font-medium">{tag.name}</span>
+                <span className="text-sm text-zinc-500">
+                  {tag.admin ? "Admin" : `Tag ${formatDate(tag.createdAt)} óta`}
+                </span>
+              </div>
+              {csoport.admin && (
+                <TagControls
+                  csoportId={csoport.id}
+                  tagId={tag.felhasznaloId}
+                  tagName={tag.name}
+                  admin={tag.admin}
+                  self={tag.felhasznaloId === felhasznalo.id}
+                />
+              )}
             </li>
           ))}
         </ul>
@@ -74,7 +93,36 @@ async function Csoport({ csoportId }: { csoportId: string }) {
       <CsatornaSection csoport={csoport} />
 
       <MeghivoSection csoportId={csoport.id} />
+
+      <BeallitasokSection csoport={csoport} />
     </>
+  );
+}
+
+function BeallitasokSection({ csoport }: { csoport: CsoportDetail }) {
+  return (
+    <section className="flex flex-col gap-3">
+      <h2 className="text-xl font-semibold">Saját beállításaim</h2>
+      <div
+        className={`${cardClass} flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between`}
+      >
+        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+          {csoport.muted
+            ? "Elnémítottad: ebből a csoportból nem kapsz DM-et. A csatornaüzenetek ettől még megjelennek."
+            : "Ha elnémítod, ebből a csoportból nem kapsz DM-et. A csatornaüzenetek ettől még megjelennek."}
+        </p>
+        <form action={setMutedAction.bind(null, csoport.id, !csoport.muted)}>
+          <button
+            type="submit"
+            aria-pressed={csoport.muted}
+            className={secondaryButtonClass}
+          >
+            {csoport.muted ? "Némítás feloldása" : "Értesítések némítása"}
+          </button>
+        </form>
+      </div>
+      <LeaveControl csoportId={csoport.id} />
+    </section>
   );
 }
 

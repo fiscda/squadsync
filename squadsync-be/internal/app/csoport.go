@@ -30,11 +30,22 @@ var ErrFelhasznaloUnknown = errors.New("felhasznalo unknown")
 // an Admin, and the action needs one.
 var ErrNotAdmin = errors.New("not an admin of the csoport")
 
+// ErrLastAdmin means the action would leave the Csoport without an Admin:
+// the last Admin can't drop the role or leave until another Tag is Admin.
+var ErrLastAdmin = errors.New("the last admin can't give up the role or leave")
+
+// ErrSzervezoOfActiveEsemeny means the Tag is the Szervezo of an Esemeny in
+// Egyeztetes or Veglegesitve, so it can't leave the Csoport or be removed
+// from it. Handing the role over comes with #12.
+var ErrSzervezoOfActiveEsemeny = errors.New("tag is the szervezo of an active esemeny")
+
 // CsoportDetail is a Csoport as one of its Tags sees it.
 type CsoportDetail struct {
 	domain.Csoport
 	// Admin tells whether the viewing Tag is an Admin.
 	Admin bool
+	// Muted tells whether the viewing Tag muted the DMs of this Csoport.
+	Muted bool
 	Tags  []domain.TagWithName
 	// Csatorna is the linked Discord channel, or nil if there is none.
 	Csatorna *domain.Csatorna
@@ -43,16 +54,13 @@ type CsoportDetail struct {
 // CreateCsoport creates a Csoport. The creator becomes its first Tag, with
 // the Admin role.
 func (a *App) CreateCsoport(ctx context.Context, felhasznaloID, name string) (domain.Csoport, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return domain.Csoport{}, fmt.Errorf("%w: a csoport needs a name", ErrInvalidInput)
-	}
-	if utf8.RuneCountInString(name) > MaxCsoportNameLength {
-		return domain.Csoport{}, fmt.Errorf("%w: a csoport name is at most %d characters", ErrInvalidInput, MaxCsoportNameLength)
+	name, err := validCsoportName(name)
+	if err != nil {
+		return domain.Csoport{}, err
 	}
 
 	var csoport domain.Csoport
-	err := a.store.InTx(ctx, func(q store.Queries) error {
+	err = a.store.InTx(ctx, func(q store.Queries) error {
 		if err := requireFelhasznalo(ctx, q, felhasznaloID); err != nil {
 			return err
 		}
@@ -72,6 +80,156 @@ func (a *App) CreateCsoport(ctx context.Context, felhasznaloID, name string) (do
 		return domain.Csoport{}, err
 	}
 	return csoport, nil
+}
+
+func validCsoportName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", fmt.Errorf("%w: a csoport needs a name", ErrInvalidInput)
+	}
+	if utf8.RuneCountInString(name) > MaxCsoportNameLength {
+		return "", fmt.Errorf("%w: a csoport name is at most %d characters", ErrInvalidInput, MaxCsoportNameLength)
+	}
+	return name, nil
+}
+
+// RenameCsoport renames the Csoport, under the same rules as creating it.
+// Only an Admin may: another Tag gets ErrNotAdmin, anyone else ErrNotFound.
+func (a *App) RenameCsoport(ctx context.Context, felhasznaloID, csoportID, name string) (domain.Csoport, error) {
+	var csoport domain.Csoport
+	err := a.store.InTx(ctx, func(q store.Queries) error {
+		if err := requireAdmin(ctx, q, csoportID, felhasznaloID); err != nil {
+			return err
+		}
+		name, err := validCsoportName(name)
+		if err != nil {
+			return err
+		}
+		if err := q.RenameCsoport(ctx, csoportID, name); err != nil {
+			return notFound(err)
+		}
+		csoport, err = q.FindCsoport(ctx, csoportID)
+		return notFound(err)
+	})
+	if err != nil {
+		return domain.Csoport{}, err
+	}
+	return csoport, nil
+}
+
+// SetAdmin grants or revokes the Admin role of another (or the same) Tag.
+// Only an Admin may: another Tag gets ErrNotAdmin, anyone else ErrNotFound,
+// as does a target who isn't a Tag. Revoking the role of the last Admin
+// gives ErrLastAdmin.
+func (a *App) SetAdmin(ctx context.Context, felhasznaloID, csoportID, targetID string, admin bool) error {
+	return a.store.InTx(ctx, func(q store.Queries) error {
+		if err := requireAdmin(ctx, q, csoportID, felhasznaloID); err != nil {
+			return err
+		}
+		target, err := requireTag(ctx, q, csoportID, targetID)
+		if err != nil {
+			return err
+		}
+		if target.Admin == admin {
+			return nil
+		}
+		if !admin {
+			if err := requireOtherAdmin(ctx, q, csoportID); err != nil {
+				return err
+			}
+		}
+		return q.SetTagAdmin(ctx, csoportID, targetID, admin)
+	})
+}
+
+// RemoveTag removes a Tag from the Csoport. Only an Admin may: another Tag
+// gets ErrNotAdmin, anyone else ErrNotFound, as does a target who isn't a
+// Tag. A Szervezo of an active Esemeny gives ErrSzervezoOfActiveEsemeny.
+func (a *App) RemoveTag(ctx context.Context, felhasznaloID, csoportID, targetID string) error {
+	return a.store.InTx(ctx, func(q store.Queries) error {
+		if err := requireAdmin(ctx, q, csoportID, felhasznaloID); err != nil {
+			return err
+		}
+		return deleteTag(ctx, q, csoportID, targetID)
+	})
+}
+
+// LeaveCsoport ends the Felhasznalo's own Tag. Any Tag may leave; anyone else
+// gets ErrNotFound.
+//
+// The last Admin gets ErrLastAdmin unless they are the only Tag, and a
+// Szervezo of an active Esemeny gets ErrSzervezoOfActiveEsemeny. When the
+// last Tag leaves, the Csoport simply has no Tags; the next Felhasznalo to
+// join it becomes its Admin (see JoinCsoport). The leaver's Visszajelzesek
+// stay, but no longer count.
+func (a *App) LeaveCsoport(ctx context.Context, felhasznaloID, csoportID string) error {
+	return a.store.InTx(ctx, func(q store.Queries) error {
+		return deleteTag(ctx, q, csoportID, felhasznaloID)
+	})
+}
+
+// SetMuted mutes or unmutes the Felhasznalo's own DMs from the Csoport.
+// Channel posts are unaffected. Anyone who isn't a Tag gets ErrNotFound.
+func (a *App) SetMuted(ctx context.Context, felhasznaloID, csoportID string, muted bool) error {
+	return a.store.InTx(ctx, func(q store.Queries) error {
+		if _, err := requireTag(ctx, q, csoportID, felhasznaloID); err != nil {
+			return err
+		}
+		return q.SetTagMuted(ctx, csoportID, felhasznaloID, muted)
+	})
+}
+
+// deleteTag removes the target's Tag unless that would leave the Csoport
+// without an Admin or an active Esemeny without its Szervezo.
+func deleteTag(ctx context.Context, q store.Queries, csoportID, targetID string) error {
+	target, err := requireTag(ctx, q, csoportID, targetID)
+	if err != nil {
+		return err
+	}
+	if target.Admin {
+		// A lone Tag has nobody to hand the role to, and may leave: then the
+		// Csoport just has no Tags.
+		tags, err := q.CountTags(ctx, csoportID)
+		if err != nil {
+			return err
+		}
+		if tags > 1 {
+			if err := requireOtherAdmin(ctx, q, csoportID); err != nil {
+				return err
+			}
+		}
+	}
+	szervezo, err := q.IsSzervezoOfActiveEsemeny(ctx, csoportID, targetID)
+	if err != nil {
+		return err
+	}
+	if szervezo {
+		return ErrSzervezoOfActiveEsemeny
+	}
+	return q.DeleteTag(ctx, csoportID, targetID)
+}
+
+// requireOtherAdmin gives ErrLastAdmin unless the Csoport has at least two
+// Admins, so that one of them can give up the role.
+func requireOtherAdmin(ctx context.Context, q store.Queries, csoportID string) error {
+	n, err := q.CountAdmins(ctx, csoportID)
+	if err != nil {
+		return err
+	}
+	if n < 2 {
+		return ErrLastAdmin
+	}
+	return nil
+}
+
+// mutedCsoport tells whether the Felhasznalo muted the Csoport's DMs. Someone
+// who isn't a Tag (any more) hasn't muted anything.
+func (a *App) mutedCsoport(ctx context.Context, csoportID, felhasznaloID string) (bool, error) {
+	tag, err := a.store.FindTag(ctx, csoportID, felhasznaloID)
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	return tag.Muted, err
 }
 
 // CsoportokOf lists every Csoport the Felhasznalo is a Tag of, in the order
@@ -99,7 +257,7 @@ func (a *App) Csoport(ctx context.Context, felhasznaloID, csoportID string) (Cso
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return CsoportDetail{}, err
 	}
-	d := CsoportDetail{Csoport: csoport, Admin: tag.Admin, Tags: tags}
+	d := CsoportDetail{Csoport: csoport, Admin: tag.Admin, Muted: tag.Muted, Tags: tags}
 	if err == nil {
 		d.Csatorna = &csatorna
 	}
@@ -170,7 +328,8 @@ type JoinResult struct {
 }
 
 // JoinCsoport makes the Felhasznalo a Tag of the Csoport behind the link
-// token. A Felhasznalo who already is a Tag keeps their Tag, role included,
+// token. A Felhasznalo who joins a Csoport that has no Tags becomes its
+// Admin. A Felhasznalo who already is a Tag keeps their Tag, role included,
 // and gets the Csoport back even if the link has been revoked. Otherwise an
 // unknown token gives ErrNotFound and a revoked one ErrCsoportMeghivoRevoked.
 // An unknown Felhasznalo gives ErrFelhasznaloUnknown.
@@ -201,9 +360,16 @@ func (a *App) JoinCsoport(ctx context.Context, felhasznaloID, token string) (Joi
 			return ErrCsoportMeghivoRevoked
 		}
 		result.Joined = true
+		// A Csoport nobody is a Tag of has nobody to administer it, so
+		// whoever joins it first becomes its Admin.
+		tags, err := q.CountTags(ctx, csoport.ID)
+		if err != nil {
+			return err
+		}
 		return q.InsertTag(ctx, domain.Tag{
 			CsoportID:     csoport.ID,
 			FelhasznaloID: felhasznaloID,
+			Admin:         tags == 0,
 			CreatedAt:     a.clock.Now(),
 		})
 	})

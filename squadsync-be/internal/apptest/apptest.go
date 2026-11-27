@@ -35,6 +35,8 @@ type Harness struct {
 	Discord  *gatewayfake.Discord
 	Calendar *gatewayfake.GoogleCalendar
 	Spotify  *gatewayfake.Spotify
+	// DiscordOAuth answers the codes a test sets up with Authorize.
+	DiscordOAuth *gatewayfake.DiscordOAuth
 	// DBPath is the temporary SQLite file, removed when the test ends.
 	DBPath string
 }
@@ -50,14 +52,17 @@ func New(t testing.TB) *Harness {
 		Calendar: &gatewayfake.GoogleCalendar{},
 		Spotify:  &gatewayfake.Spotify{},
 		DBPath:   path,
+
+		DiscordOAuth: &gatewayfake.DiscordOAuth{},
 	}
 	h.App = app.New(app.Deps{
-		Store:    h.Store,
-		Clock:    h.Clock,
-		Discord:  h.Discord,
-		Calendar: h.Calendar,
-		Spotify:  h.Spotify,
-		WebURL:   WebURL,
+		Store:        h.Store,
+		Clock:        h.Clock,
+		Discord:      h.Discord,
+		Calendar:     h.Calendar,
+		Spotify:      h.Spotify,
+		DiscordOAuth: h.DiscordOAuth,
+		WebURL:       WebURL,
 	})
 	return h
 }

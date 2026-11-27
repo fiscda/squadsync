@@ -15,7 +15,10 @@ type Tag struct {
 	CsoportID     string
 	FelhasznaloID string
 	Admin         bool
-	CreatedAt     time.Time
+	// Muted tells whether the Tag silenced the DMs of this Csoport. Only
+	// FindTag fills it in.
+	Muted     bool
+	CreatedAt time.Time
 }
 
 // TagWithName is a Tag together with its Felhasznalo's display name.

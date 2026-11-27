@@ -258,3 +258,63 @@ func (s *Spotify) CreatedPlaylists() []string {
 	defer s.mu.Unlock()
 	return append([]string(nil), s.playlists...)
 }
+
+// CodeExchange is one recorded DiscordOAuth.ExchangeCode call.
+type CodeExchange struct {
+	Code        string
+	RedirectURI string
+}
+
+// DiscordOAuth answers authorization codes from a table set up by the test
+// instead of calling Discord, and records every exchange. An unknown code is
+// refused with gateway.ErrDiscordCodeRejected.
+type DiscordOAuth struct {
+	mu        sync.Mutex
+	codes     map[string]gateway.DiscordIdentity
+	exchanges []CodeExchange
+	err       error
+}
+
+var _ gateway.DiscordOAuth = (*DiscordOAuth)(nil)
+
+// Authorize makes code stand for the given Discord account, as if that
+// account had just authorized the app, and returns the code.
+func (d *DiscordOAuth) Authorize(code string, identity gateway.DiscordIdentity) string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.codes == nil {
+		d.codes = map[string]gateway.DiscordIdentity{}
+	}
+	d.codes[code] = identity
+	return code
+}
+
+// ExchangeCode records the call and answers from the table.
+func (d *DiscordOAuth) ExchangeCode(_ context.Context, code, redirectURI string) (gateway.DiscordIdentity, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.exchanges = append(d.exchanges, CodeExchange{Code: code, RedirectURI: redirectURI})
+	if d.err != nil {
+		return gateway.DiscordIdentity{}, d.err
+	}
+	identity, ok := d.codes[code]
+	if !ok {
+		return gateway.DiscordIdentity{}, gateway.ErrDiscordCodeRejected
+	}
+	return identity, nil
+}
+
+// Exchanges returns every recorded exchange, in order.
+func (d *DiscordOAuth) Exchanges() []CodeExchange {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]CodeExchange(nil), d.exchanges...)
+}
+
+// Fail makes every later ExchangeCode fail with err (nil restores normal
+// answers).
+func (d *DiscordOAuth) Fail(err error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.err = err
+}

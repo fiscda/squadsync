@@ -20,6 +20,8 @@ export class BackendError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** Go's machine-readable reason for some errors, e.g. "last_admin"; "" otherwise. */
+    readonly code: string = "",
   ) {
     super(message);
     this.name = "BackendError";
@@ -29,6 +31,16 @@ export class BackendError extends Error {
 function backendUrl(path: string): string {
   const port = process.env.BACKEND_PORT || "8081";
   return `http://127.0.0.1:${port}${path}`;
+}
+
+/** The "code" of a Go error body like {"error":"…","code":"last_admin"}, or "". */
+function errorCode(body: string): string {
+  try {
+    const code = (JSON.parse(body) as { code?: unknown }).code;
+    return typeof code === "string" ? code : "";
+  } catch {
+    return "";
+  }
 }
 
 /**
@@ -66,6 +78,7 @@ async function callBackend<T>(
     throw new BackendError(
       res.status,
       `${method} ${path} failed with ${res.status}: ${text}`,
+      errorCode(text),
     );
   }
   if (res.status === 204) {
@@ -100,6 +113,109 @@ export async function getFelhasznalo(
   }
 }
 
+// --- Discord accounts (ADR-0002) ---
+
+/** One of a Felhasználó's Discord accounts. */
+export type DiscordAccount = {
+  discordId: string;
+  /** The account's Discord name when it was recorded. May be empty. */
+  name: string;
+  /** The main account is the one that logs in to the web. */
+  main: boolean;
+  /** RFC 3339, UTC */
+  createdAt: string;
+};
+
+/** The Felhasználó's Discord accounts, the main one first. */
+export function listDiscordAccounts(
+  felhasznaloId: string,
+): Promise<DiscordAccount[]> {
+  return callBackend(felhasznaloId, "GET", "/felhasznalo/discord-account");
+}
+
+export type LinkOutcome =
+  | {
+      status: "linked";
+      account: DiscordAccount;
+      /** It already was theirs, so nothing changed. */
+      alreadyLinked: boolean;
+      /**
+       * The empty Felhasználó (and Better Auth user) the account was taken
+       * from, which Go removed; or "".
+       */
+      removedFelhasznaloId: string;
+    }
+  /** The account belongs to a Felhasználó with a Tag or other data. */
+  | { status: "in-use" }
+  /** Discord refused the code (expired, reused, wrong redirect URI). */
+  | { status: "code-rejected" }
+  /** Go isn't configured for linking (no Discord credentials or URL). */
+  | { status: "unavailable" };
+
+/**
+ * Finishes linking a further Discord account: Go exchanges the code from
+ * Discord's redirect with Discord, using its own redirect URI
+ * (BETTER_AUTH_URL + /fiok/discord/callback), then records the link.
+ */
+export async function linkDiscordAccount(
+  felhasznaloId: string,
+  code: string,
+): Promise<LinkOutcome> {
+  try {
+    const result = await callBackend<{
+      account: DiscordAccount;
+      alreadyLinked: boolean;
+      removedFelhasznaloId: string;
+    }>(felhasznaloId, "POST", "/felhasznalo/discord-account", { code });
+    return { status: "linked", ...result };
+  } catch (err) {
+    if (err instanceof BackendError && err.status === 409) {
+      return { status: "in-use" };
+    }
+    if (err instanceof BackendError && err.status === 400) {
+      return { status: "code-rejected" };
+    }
+    if (err instanceof BackendError && err.status === 503) {
+      return { status: "unavailable" };
+    }
+    throw err;
+  }
+}
+
+/**
+ * Unlinks one of the Felhasználó's extra Discord accounts. Go answers 409
+ * for the main account and 404 for one that isn't theirs.
+ */
+export async function unlinkDiscordAccount(
+  felhasznaloId: string,
+  discordId: string,
+): Promise<void> {
+  await callBackend<void>(
+    felhasznaloId,
+    "DELETE",
+    `/felhasznalo/discord-account/${encodeURIComponent(discordId)}`,
+  );
+}
+
+/** Whether a Discord account may log in to the web, and if not, why. */
+export type WebLoginCheck = {
+  allowed: boolean;
+  /** The refusal to show, naming the main account; "" when allowed. */
+  message: string;
+};
+
+/**
+ * Asks Go whether a Discord account may log in to the web. Runs during
+ * login, before any Felhasználó is known, so it sends only the secret.
+ */
+export function checkWebLogin(discordId: string): Promise<WebLoginCheck> {
+  return callBackend(
+    null,
+    "GET",
+    `/discord-account/${encodeURIComponent(discordId)}/web-login`,
+  );
+}
+
 // --- Csoport and Csoport-meghívó ---
 
 export type Csoport = {
@@ -127,6 +243,8 @@ export type Tag = {
 export type CsoportDetail = Csoport & {
   /** Whether the caller is an Admin of the Csoport. */
   admin: boolean;
+  /** Whether the caller muted the DMs of this Csoport. */
+  muted: boolean;
   /** Admins first, then in the order they joined. */
   tags: Tag[];
   /** The linked Discord channel, or null. */
@@ -229,6 +347,80 @@ export async function unlinkCsatorna(
     felhasznaloId,
     "DELETE",
     `/csoport/${encodeURIComponent(csoportId)}/csatorna`,
+  );
+}
+
+/** Renames the Csoport. Admins only (403); 400 for an invalid name. */
+export function renameCsoport(
+  felhasznaloId: string,
+  csoportId: string,
+  name: string,
+): Promise<Csoport> {
+  return callBackend(
+    felhasznaloId,
+    "PUT",
+    `/csoport/${encodeURIComponent(csoportId)}/name`,
+    { name },
+  );
+}
+
+/**
+ * Grants or revokes another Tag's Admin role. Admins only (403). Go answers
+ * 409 with code "last_admin" when the last Admin would drop the role.
+ */
+export async function setTagAdmin(
+  felhasznaloId: string,
+  csoportId: string,
+  targetId: string,
+  admin: boolean,
+): Promise<void> {
+  await callBackend<void>(
+    felhasznaloId,
+    "PUT",
+    `/csoport/${encodeURIComponent(csoportId)}/tag/${encodeURIComponent(targetId)}/admin`,
+    { admin },
+  );
+}
+
+/**
+ * Removes a Tag. Admins only (403). Go answers 409 with code "last_admin" or
+ * "szervezo_of_active_esemeny".
+ */
+export async function removeTag(
+  felhasznaloId: string,
+  csoportId: string,
+  targetId: string,
+): Promise<void> {
+  await callBackend<void>(
+    felhasznaloId,
+    "DELETE",
+    `/csoport/${encodeURIComponent(csoportId)}/tag/${encodeURIComponent(targetId)}`,
+  );
+}
+
+/** The caller leaves the Csoport. Go answers 409 like removeTag does. */
+export async function leaveCsoport(
+  felhasznaloId: string,
+  csoportId: string,
+): Promise<void> {
+  await callBackend<void>(
+    felhasznaloId,
+    "POST",
+    `/csoport/${encodeURIComponent(csoportId)}/kilepes`,
+  );
+}
+
+/** Mutes or unmutes the caller's DMs from the Csoport. */
+export async function setCsoportMuted(
+  felhasznaloId: string,
+  csoportId: string,
+  muted: boolean,
+): Promise<void> {
+  await callBackend<void>(
+    felhasznaloId,
+    "PUT",
+    `/csoport/${encodeURIComponent(csoportId)}/nemitas`,
+    { muted },
   );
 }
 
