@@ -121,6 +121,16 @@ func (q Queries) FinishJob(ctx context.Context, id string, at time.Time) error {
 	return requireAffected(res, "finish job")
 }
 
+// LeaseJob keeps other runners off a pending job until the given time, by
+// moving its run_at there.
+func (q Queries) LeaseJob(ctx context.Context, id string, until time.Time) error {
+	res, err := q.db.ExecContext(ctx, `UPDATE job SET run_at = ? WHERE id = ? AND done_at IS NULL`, formatTime(until), id)
+	if err != nil {
+		return fmt.Errorf("lease job: %w", err)
+	}
+	return requireAffected(res, "lease job")
+}
+
 // FailJob records a failed attempt: the job runs again at retryAt, or, when
 // retryAt is nil, gives up and is done.
 func (q Queries) FailJob(ctx context.Context, id string, at time.Time, retryAt *time.Time, lastError string) error {

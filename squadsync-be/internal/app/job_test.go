@@ -565,3 +565,78 @@ func TestAFailingJobIsRetriedWithBackoffThenGivenUp(t *testing.T) {
 		t.Fatalf("a given-up job ran again: %+v", j)
 	}
 }
+
+func TestADurableJobsOutsideCallIsRetriedUntilItSucceedsThenItsResultIsStored(t *testing.T) {
+	h := apptest.New(t)
+	ctx := context.Background()
+	c := csoportOf(t, h, "bela")
+	e := propose(t, h, "anna", c.ID, 1)
+
+	calls := 0
+	stored := ""
+	// A fake outside call, like creating a Spotify playlist: it fails once,
+	// then succeeds with an id that the job stores when it's marked done.
+	h.App.RegisterTestDurableJob("lejatszasi_lista", func(ctx context.Context) (func(context.Context, store.Queries) error, error) {
+		calls++
+		// It runs outside any transaction: the app can write meanwhile...
+		if err := h.App.SetMuted(ctx, "bela", c.ID, calls%2 == 0); err != nil {
+			t.Errorf("a write during the outside call: %v", err)
+		}
+		// ...and the leased job isn't run again by another runner.
+		if err := h.App.RunDueJobs(ctx); err != nil {
+			t.Errorf("RunDueJobs during the outside call: %v", err)
+		}
+		if calls == 1 {
+			return nil, errors.New("spotify is down")
+		}
+		return func(ctx context.Context, q store.Queries) error {
+			stored = "playlist-1"
+			return nil
+		}, nil
+	})
+	if err := h.Store.InsertJob(ctx, store.Job{ID: "j1", Kind: "lejatszasi_lista", EsemenyID: e.ID, Payload: "{}", RunAt: apptest.Start, CreatedAt: apptest.Start}); err != nil {
+		t.Fatalf("InsertJob: %v", err)
+	}
+
+	runAt(t, h, apptest.Start)
+	j, _ := h.Store.FindJob(ctx, "j1")
+	if calls != 1 || stored != "" || j.DoneAt != nil || j.Attempts != 1 || j.LastError != "spotify is down" ||
+		!j.RunAt.Equal(apptest.Start.Add(time.Minute)) {
+		t.Fatalf("after the failed call: calls=%d stored=%q job=%+v, want a retry in a minute", calls, stored, j)
+	}
+
+	runAt(t, h, apptest.Start.Add(time.Minute))
+	j, _ = h.Store.FindJob(ctx, "j1")
+	if calls != 2 || stored != "playlist-1" || j.DoneAt == nil || j.Attempts != 2 || j.LastError != "" {
+		t.Fatalf("after the successful call: calls=%d stored=%q job=%+v, want it done", calls, stored, j)
+	}
+
+	runAt(t, h, apptest.Start.Add(time.Hour))
+	if calls != 2 {
+		t.Fatalf("calls = %d, want no call once done", calls)
+	}
+}
+
+func TestChangingTheEmlekeztetokNeverSendsOneAtOnce(t *testing.T) {
+	h := apptest.New(t)
+	ctx := context.Background()
+	c := csoportOf(t, h, "bela")
+	e := propose(t, h, "anna", c.ID, 1)
+	d := detail(t, h, "anna", e.ID)
+	answer(t, h, "bela", d, 0, domain.Igen)
+	h.Clock.Set(firstStart.Add(-5 * time.Hour))
+	confirm(t, h, "anna", d, 0) // the 24-hour one is skipped, the 1-hour one waits
+
+	// Two hours before the start, the only offset becomes 3 hours: its
+	// moment has passed, and an Admin's edit sends nothing at once.
+	h.Clock.Set(firstStart.Add(-2 * time.Hour))
+	if err := h.App.SetEmlekeztetok(ctx, "anna", c.ID, []time.Duration{3 * time.Hour}); err != nil {
+		t.Fatalf("SetEmlekeztetok: %v", err)
+	}
+	runAt(t, h, firstStart.Add(-2*time.Hour))
+	runAt(t, h, firstStart.Add(-time.Hour))
+	runAt(t, h, firstStart.Add(-time.Minute))
+	if got := emlekeztetoDMs(h); len(got) != 0 {
+		t.Fatalf("emlekeztetok = %q, want none", got)
+	}
+}

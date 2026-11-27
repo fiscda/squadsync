@@ -30,7 +30,7 @@ func (a *App) scheduleVeglegesitve(ctx context.Context, q store.Queries, e domai
 	if err := a.scheduleJob(ctx, q, jobLezajlott, e.ID, at, lezajlottPayload{IdopontID: i.ID}); err != nil {
 		return err
 	}
-	return a.scheduleEmlekeztetok(ctx, q, e, i)
+	return a.scheduleEmlekeztetok(ctx, q, e, i, true)
 }
 
 // cancelVeglegesitve cancels the pending jobs of the confirmed Idopont, in

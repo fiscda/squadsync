@@ -63,6 +63,9 @@ type App struct {
 	log          *slog.Logger
 	// work runs Discord work after commits (see afterCommit).
 	work *discordWork
+	// testDurableJobs are durable job kinds that only tests register
+	// (export_test.go).
+	testDurableJobs map[jobKind]durableJobHandler
 }
 
 // New builds the application core.

@@ -198,13 +198,18 @@ func run(log *slog.Logger, args []string) error {
 }
 
 // runJobs runs the due timed jobs at once (catching up on any missed while
-// the server was down) and then every jobInterval, until ctx ends. A run in
-// progress isn't interrupted; the loop returns after it.
+// the server was down) and then every jobInterval, until ctx ends. Once ctx
+// ends, a run stops between jobs: the job in progress finishes, the rest
+// wait for the next start.
 func runJobs(ctx context.Context, a *app.App, log *slog.Logger) {
 	tick := func() {
-		tctx, cancel := context.WithTimeout(context.Background(), jobTickTimeout)
+		tctx, cancel := context.WithTimeout(ctx, jobTickTimeout)
 		defer cancel()
-		if err := a.RunDueJobs(tctx); err != nil {
+		err := a.RunDueJobs(tctx)
+		switch {
+		case errors.Is(err, context.Canceled) && ctx.Err() != nil:
+			log.Info("timed jobs stopped for shutdown")
+		case err != nil:
 			log.Error("run timed jobs", "err", err)
 		}
 	}

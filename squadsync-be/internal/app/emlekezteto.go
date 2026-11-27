@@ -19,11 +19,13 @@ import (
 //
 // Each offset's Emlekezteto is scheduled at the start minus the offset when
 // the Idopont is confirmed (or the offsets change). One whose moment has
-// already passed by then is skipped, except the shortest offset's: that one
-// is sent at once if the start is still ahead, so confirming shortly before
-// the start still reminds everyone once. (With the default 24 hours and 1
-// hour, confirming 30 minutes before sends the 1-hour one at once and skips
-// the 24-hour one.)
+// already passed by then is skipped. When confirming, and only then, the
+// shortest offset's is the exception: it is sent at once if the start is
+// still ahead, so confirming shortly before the start still reminds
+// everyone once. (With the default 24 hours and 1 hour, confirming 30
+// minutes before sends the 1-hour one at once and skips the 24-hour one.)
+// Changing the offsets never sends one at once: an Admin's edit shouldn't
+// surprise everyone with a DM.
 //
 // An Emlekezteto that runs late, after downtime, is still sent, unless the
 // Idopont has already started or a shorter offset's moment has passed too
@@ -87,7 +89,7 @@ func (a *App) SetEmlekeztetok(ctx context.Context, felhasznaloID, csoportID stri
 			if err := cancelJobs(ctx, q, e.ID, jobEmlekezteto); err != nil {
 				return err
 			}
-			if err := a.scheduleEmlekeztetok(ctx, q, e.Esemeny, i); err != nil {
+			if err := a.scheduleEmlekeztetok(ctx, q, e.Esemeny, i, false); err != nil {
 				return err
 			}
 		}
@@ -108,8 +110,10 @@ func emlekeztetok(ctx context.Context, q store.Queries, csoportID string) ([]tim
 }
 
 // scheduleEmlekeztetok schedules the Emlekeztetok of the confirmed Idopont
-// by the Csoport's offsets (see "When an Emlekezteto is sent").
-func (a *App) scheduleEmlekeztetok(ctx context.Context, q store.Queries, e domain.Esemeny, i domain.Idopont) error {
+// by the Csoport's offsets (see "When an Emlekezteto is sent"). catchUp,
+// set only when confirming, sends the shortest offset's at once if its
+// moment has passed but the start hasn't.
+func (a *App) scheduleEmlekeztetok(ctx context.Context, q store.Queries, e domain.Esemeny, i domain.Idopont, catchUp bool) error {
 	percek, err := q.FindEmlekeztetoPercek(ctx, e.CsoportID)
 	if err != nil || len(percek) == 0 {
 		return err
@@ -119,7 +123,7 @@ func (a *App) scheduleEmlekeztetok(ctx context.Context, q store.Queries, e domai
 	for _, p := range percek {
 		at := i.Start.Add(-time.Duration(p) * time.Minute)
 		if at.Before(now) {
-			if p != shortest || !now.Before(i.Start) {
+			if !catchUp || p != shortest || !now.Before(i.Start) {
 				continue
 			}
 			at = now

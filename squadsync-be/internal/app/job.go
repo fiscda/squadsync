@@ -17,20 +17,43 @@ import (
 //
 // # Adding a job kind
 //
-//  1. Add a jobKind constant and register its handler in jobHandlers.
+//  1. Add a jobKind constant and register its handler in jobHandlers (the
+//     normal mode) or in durableJobHandlers (the durable mode, below).
 //  2. Schedule it with scheduleJob inside the transaction of the use case
 //     that makes it due, and cancel it with cancelJobs where it stops being
 //     due.
 //
-// A handler runs inside the job's transaction, which also marks the job
-// done, so a job's database changes happen exactly once. It must re-check
-// that the job still applies (the Esemeny's state may have changed) and do
-// nothing otherwise. Discord work goes in the returned func, which runs after
-// the commit through afterCommit, best effort, like any use case's; it must
-// never call a use case that itself calls afterCommit (see discordWork).
+// Either way, a handler must re-check that the job still applies (the
+// Esemeny's state may have changed) and do nothing otherwise. A handler
+// that returns an error is rolled back and retried with backoff, up to
+// maxJobAttempts attempts in all; then the job is given up and logged.
 //
-// A handler that returns an error is rolled back and retried with backoff,
-// up to maxJobAttempts attempts in all; then the job is given up and logged.
+// # Normal mode: jobHandler
+//
+// The handler runs inside the job's transaction, which also marks the job
+// done, so its database changes happen exactly once. Discord work goes in
+// the returned after func, which runs after the commit through afterCommit.
+// That work is best effort and is never retried: a failed DM is only logged,
+// as for any use case. It must never call a use case that itself calls
+// afterCommit (see discordWork). Use this mode for DMs and message edits.
+//
+// # Durable mode: durableJobHandler
+//
+// For an outside call that must succeed, such as creating a Spotify
+// playlist (#23), whose failure should be retried:
+//
+//  1. The handler reads what it needs in a short transaction and returns
+//     the call (nil when there is nothing to do; the job is then done).
+//  2. The call runs outside any transaction, so a slow service never holds
+//     SQLite's write lock. It bounds itself with its own timeout.
+//  3. On success it returns a finish func, which runs in the transaction
+//     that marks the job done and stores what the call returned (such as a
+//     playlist id). On failure the job is retried with the usual backoff.
+//
+// While the call runs the job is leased for durableJobLease, so another
+// runner leaves it alone. The call is at least once: if the process dies
+// during it, or finish fails, it is made again, so it should be safe to
+// repeat (or check first whether it already happened).
 
 // jobKind names what a job does.
 type jobKind string
@@ -43,16 +66,35 @@ const (
 )
 
 // jobHandler runs one due job in its transaction. after, if not nil, runs
-// once the transaction commits.
+// once the transaction commits (best effort, never retried).
 type jobHandler func(ctx context.Context, q store.Queries, j store.Job) (after func(context.Context), err error)
 
-// jobHandlers is the one place job kinds are registered.
+// durableJobHandler reads what a durable job needs in a transaction and
+// returns its outside call, nil for nothing to do.
+type durableJobHandler func(ctx context.Context, q store.Queries, j store.Job) (call durableCall, err error)
+
+// durableCall is a durable job's outside call, made outside any
+// transaction. finish, if not nil, stores its results in the transaction
+// that marks the job done.
+type durableCall func(ctx context.Context) (finish func(ctx context.Context, q store.Queries) error, err error)
+
+// jobHandlers is the one place normal-mode job kinds are registered.
 func (a *App) jobHandlers() map[jobKind]jobHandler {
 	return map[jobKind]jobHandler{
 		jobLezajlott:   a.runLezajlott,
 		jobEmlekezteto: a.runEmlekezteto,
 		jobHatarido:    a.runHatarido,
 	}
+}
+
+// durableJobHandlers is the one place durable-mode job kinds are
+// registered. #23 adds the Spotify playlist here.
+func (a *App) durableJobHandlers() map[jobKind]durableJobHandler {
+	handlers := map[jobKind]durableJobHandler{}
+	for k, h := range a.testDurableJobs {
+		handlers[k] = h
+	}
+	return handlers
 }
 
 const (
@@ -62,6 +104,9 @@ const (
 	// waits jobRetryFactor times longer (1, 5, 25, 125 minutes).
 	firstJobRetry  = time.Minute
 	jobRetryFactor = 5
+	// durableJobLease is how long a durable job's outside call may take
+	// before another runner may try it again.
+	durableJobLease = 10 * time.Minute
 	// dueJobBatch bounds the jobs one RunDueJobs call runs; the rest run on
 	// the next call.
 	dueJobBatch = 500
@@ -70,41 +115,59 @@ const (
 // RunDueJobs runs every pending job whose time has come (by the app's
 // clock), including ones missed while the server was down. It is idempotent
 // and safe to call concurrently: each job runs in its own transaction that
-// first checks it's still pending, so a job runs once. It returns an error
-// only when it can't read the due jobs; a failing job is recorded and
-// retried later.
+// first checks it's still pending, so a job runs once. Once ctx is
+// cancelled it stops between jobs; the job in progress finishes. It returns
+// an error only when it can't read the due jobs (or ctx ended); a failing
+// job is recorded and retried later.
 func (a *App) RunDueJobs(ctx context.Context) error {
 	now := a.clock.Now()
 	ids, err := a.store.ListDueJobIDs(ctx, now, dueJobBatch)
 	if err != nil {
 		return err
 	}
+	// A job in progress isn't interrupted, so it never stops halfway.
+	jobCtx := context.WithoutCancel(ctx)
 	for _, id := range ids {
-		if ctx.Err() != nil {
-			return ctx.Err()
+		if err := ctx.Err(); err != nil {
+			return err
 		}
-		a.runJob(ctx, id, now)
+		a.runJob(jobCtx, id, now)
 	}
 	return nil
+}
+
+// dueJob finds the job if it is still pending and due at now.
+func dueJob(ctx context.Context, q store.Queries, id string, now time.Time) (store.Job, bool, error) {
+	j, err := q.FindJob(ctx, id)
+	if errors.Is(err, store.ErrNotFound) {
+		return store.Job{}, false, nil // cancelled meanwhile
+	}
+	if err != nil {
+		return store.Job{}, false, err
+	}
+	// Done by another runner, or retried or leased for later.
+	return j, j.DoneAt == nil && !j.RunAt.After(now), nil
 }
 
 // runJob runs one job, if it is still pending and due.
 func (a *App) runJob(ctx context.Context, id string, now time.Time) {
 	var after func(context.Context)
-	var kind jobKind
+	var durable durableCall
 	err := a.store.InTx(ctx, func(q store.Queries) error {
-		j, err := q.FindJob(ctx, id)
-		if errors.Is(err, store.ErrNotFound) {
-			return nil // cancelled meanwhile
-		}
-		if err != nil {
+		j, due, err := dueJob(ctx, q, id, now)
+		if err != nil || !due {
 			return err
 		}
-		if j.DoneAt != nil || j.RunAt.After(now) {
-			return nil // another runner got it first, or it was retried
+		if h, ok := a.durableJobHandlers()[jobKind(j.Kind)]; ok {
+			if durable, err = h(ctx, q, j); err != nil {
+				return err
+			}
+			if durable != nil {
+				return q.LeaseJob(ctx, j.ID, now.Add(durableJobLease))
+			}
+			return q.FinishJob(ctx, j.ID, now)
 		}
-		kind = jobKind(j.Kind)
-		h, ok := a.jobHandlers()[kind]
+		h, ok := a.jobHandlers()[jobKind(j.Kind)]
 		if !ok {
 			return fmt.Errorf("unknown job kind %q", j.Kind)
 		}
@@ -114,12 +177,41 @@ func (a *App) runJob(ctx context.Context, id string, now time.Time) {
 		return q.FinishJob(ctx, j.ID, now)
 	})
 	if err != nil {
-		after = nil
 		a.failJob(ctx, id, now, err)
+		return
+	}
+	if durable != nil {
+		a.finishDurableJob(ctx, id, now, durable)
 		return
 	}
 	if after != nil {
 		a.afterCommit(after)
+	}
+}
+
+// finishDurableJob makes a leased durable job's outside call, outside any
+// transaction, then marks the job done with its results.
+func (a *App) finishDurableJob(ctx context.Context, id string, now time.Time, call durableCall) {
+	finish, err := call(ctx)
+	if err == nil {
+		err = a.store.InTx(ctx, func(q store.Queries) error {
+			j, err := q.FindJob(ctx, id)
+			if err != nil {
+				return err
+			}
+			if j.DoneAt != nil {
+				return nil
+			}
+			if finish != nil {
+				if err := finish(ctx, q); err != nil {
+					return err
+				}
+			}
+			return q.FinishJob(ctx, id, now)
+		})
+	}
+	if err != nil {
+		a.failJob(ctx, id, now, err)
 	}
 }
 

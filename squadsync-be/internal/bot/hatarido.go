@@ -28,6 +28,7 @@ const (
 	hataridoFormat       = "⏳ Lejárt a szavazási határidő: **%s** (%s)\nVálaszd ki a végleges időpontot. A szavazás továbbra is nyitva marad."
 	hataridoLineFormat   = "\n%d%s%s – %s"
 	hataridoWebFormat    = "\nTúl sok időpont van a gombokhoz, véglegesíteni a weboldalon tudsz: %s"
+	hataridoWebNoLink    = "\nTúl sok időpont van a gombokhoz, véglegesíteni a weboldalon tudsz."
 	confirmButtonFormat  = "Véglegesítés: %d%s%s"
 	maxButtonLabelLength = 80
 )
@@ -64,7 +65,11 @@ func renderHatarido(h gateway.HataridoDM) (string, []discordgo.MessageComponent,
 	}
 	components := []discordgo.MessageComponent{}
 	if !h.ConfirmButtons || len(h.Idopontok) > gateway.MaxAnswerRows {
-		fmt.Fprintf(&b, hataridoWebFormat, h.Link)
+		if h.Link != "" {
+			fmt.Fprintf(&b, hataridoWebFormat, h.Link)
+		} else {
+			b.WriteString(hataridoWebNoLink)
+		}
 		return b.String(), components, nil
 	}
 	if h.Link != "" {
