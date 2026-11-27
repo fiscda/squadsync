@@ -16,6 +16,11 @@ func (s *server) registerCsoport(mux *http.ServeMux) {
 	mux.HandleFunc("POST /csoport/{id}/meghivo", withFelhasznalo(s.createCsoportMeghivo))
 	mux.HandleFunc("GET /csoport/{id}/meghivo", withFelhasznalo(s.listCsoportMeghivok))
 	mux.HandleFunc("DELETE /csoport/{id}/meghivo/{meghivoID}", withFelhasznalo(s.revokeCsoportMeghivo))
+	mux.HandleFunc("PUT /csoport/{id}/name", withFelhasznalo(s.renameCsoport))
+	mux.HandleFunc("PUT /csoport/{id}/tag/{felhasznaloID}/admin", withFelhasznalo(s.setAdmin))
+	mux.HandleFunc("DELETE /csoport/{id}/tag/{felhasznaloID}", withFelhasznalo(s.removeTag))
+	mux.HandleFunc("POST /csoport/{id}/kilepes", withFelhasznalo(s.leaveCsoport))
+	mux.HandleFunc("PUT /csoport/{id}/nemitas", withFelhasznalo(s.setMuted))
 	// Linking a channel happens in Discord (/csatorna); the web only unlinks.
 	mux.HandleFunc("DELETE /csoport/{id}/csatorna", withFelhasznalo(s.unlinkCsatorna))
 
@@ -51,7 +56,9 @@ type tagJSON struct {
 type csoportDetailJSON struct {
 	csoportJSON
 	// Admin tells whether the caller is an Admin of the Csoport.
-	Admin bool      `json:"admin"`
+	Admin bool `json:"admin"`
+	// Muted tells whether the caller muted the DMs of the Csoport.
+	Muted bool      `json:"muted"`
 	Tags  []tagJSON `json:"tags"`
 	// Csatorna is the linked Discord channel, or null.
 	Csatorna *csatornaJSON `json:"csatorna"`
@@ -123,11 +130,72 @@ func (s *server) getCsoport(w http.ResponseWriter, r *http.Request, felhasznaloI
 	for _, t := range d.Tags {
 		tags = append(tags, tagJSON{FelhasznaloID: t.FelhasznaloID, Name: t.FelhasznaloName, Admin: t.Admin, CreatedAt: t.CreatedAt})
 	}
-	out := csoportDetailJSON{csoportJSON: toCsoportJSON(d.Csoport), Admin: d.Admin, Tags: tags}
+	out := csoportDetailJSON{csoportJSON: toCsoportJSON(d.Csoport), Admin: d.Admin, Muted: d.Muted, Tags: tags}
 	if c := d.Csatorna; c != nil {
 		out.Csatorna = &csatornaJSON{GuildID: c.GuildID, ChannelID: c.ChannelID, ChannelName: c.ChannelName, LinkedAt: c.LinkedAt}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *server) renameCsoport(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
+	var body struct {
+		Name string `json:"name"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	c, err := s.app.RenameCsoport(r.Context(), felhasznaloID, r.PathValue("id"), body.Name)
+	if err != nil {
+		s.writeCsoportError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toCsoportJSON(c))
+}
+
+func (s *server) setAdmin(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
+	var body struct {
+		Admin bool `json:"admin"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	err := s.app.SetAdmin(r.Context(), felhasznaloID, r.PathValue("id"), r.PathValue("felhasznaloID"), body.Admin)
+	if err != nil {
+		s.writeCsoportError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *server) removeTag(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
+	err := s.app.RemoveTag(r.Context(), felhasznaloID, r.PathValue("id"), r.PathValue("felhasznaloID"))
+	if err != nil {
+		s.writeCsoportError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *server) leaveCsoport(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
+	if err := s.app.LeaveCsoport(r.Context(), felhasznaloID, r.PathValue("id")); err != nil {
+		s.writeCsoportError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *server) setMuted(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
+	var body struct {
+		Muted bool `json:"muted"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	if err := s.app.SetMuted(r.Context(), felhasznaloID, r.PathValue("id"), body.Muted); err != nil {
+		s.writeCsoportError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *server) unlinkCsatorna(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
@@ -204,6 +272,15 @@ func (s *server) joinCsoport(w http.ResponseWriter, r *http.Request, felhasznalo
 func (s *server) writeCsoportError(w http.ResponseWriter, r *http.Request, err error) {
 	if errors.Is(err, app.ErrCsoportMeghivoRevoked) {
 		writeError(w, http.StatusGone, err.Error())
+		return
+	}
+	// The code lets the web tell the two 409s apart.
+	if errors.Is(err, app.ErrLastAdmin) {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error(), "code": "last_admin"})
+		return
+	}
+	if errors.Is(err, app.ErrSzervezoOfActiveEsemeny) {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error(), "code": "szervezo_of_active_esemeny"})
 		return
 	}
 	if errors.Is(err, app.ErrFelhasznaloUnknown) || errors.Is(err, app.ErrNotAdmin) {

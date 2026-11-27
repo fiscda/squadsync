@@ -58,9 +58,9 @@ func (q Queries) FindTag(ctx context.Context, csoportID, felhasznaloID string) (
 	t := domain.Tag{CsoportID: csoportID, FelhasznaloID: felhasznaloID}
 	var createdAt string
 	err := q.db.QueryRowContext(ctx,
-		`SELECT is_admin, created_at FROM tag WHERE csoport_id = ? AND felhasznalo_id = ?`,
+		`SELECT is_admin, muted, created_at FROM tag WHERE csoport_id = ? AND felhasznalo_id = ?`,
 		csoportID, felhasznaloID,
-	).Scan(&t.Admin, &createdAt)
+	).Scan(&t.Admin, &t.Muted, &createdAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Tag{}, ErrNotFound
 	}
@@ -244,6 +244,85 @@ func (q Queries) DeleteTag(ctx context.Context, csoportID, felhasznaloID string)
 		`DELETE FROM tag WHERE csoport_id = ? AND felhasznalo_id = ?`, csoportID, felhasznaloID)
 	if err != nil {
 		return fmt.Errorf("delete tag: %w", err)
+	}
+	return nil
+}
+
+// RenameCsoport sets the Csoport's name, or returns ErrNotFound.
+func (q Queries) RenameCsoport(ctx context.Context, id, name string) error {
+	res, err := q.db.ExecContext(ctx, `UPDATE csoport SET name = ? WHERE id = ?`, name, id)
+	if err != nil {
+		return fmt.Errorf("rename csoport: %w", err)
+	}
+	return requireAffected(res, "rename csoport")
+}
+
+// SetTagAdmin grants or revokes the Admin role, or returns ErrNotFound if
+// the Felhasznalo has no Tag in the Csoport.
+func (q Queries) SetTagAdmin(ctx context.Context, csoportID, felhasznaloID string, admin bool) error {
+	res, err := q.db.ExecContext(ctx,
+		`UPDATE tag SET is_admin = ? WHERE csoport_id = ? AND felhasznalo_id = ?`,
+		admin, csoportID, felhasznaloID)
+	if err != nil {
+		return fmt.Errorf("set tag admin: %w", err)
+	}
+	return requireAffected(res, "set tag admin")
+}
+
+// SetTagMuted mutes or unmutes the Tag's DMs from the Csoport, or returns
+// ErrNotFound if the Felhasznalo has no Tag in the Csoport.
+func (q Queries) SetTagMuted(ctx context.Context, csoportID, felhasznaloID string, muted bool) error {
+	res, err := q.db.ExecContext(ctx,
+		`UPDATE tag SET muted = ? WHERE csoport_id = ? AND felhasznalo_id = ?`,
+		muted, csoportID, felhasznaloID)
+	if err != nil {
+		return fmt.Errorf("set tag muted: %w", err)
+	}
+	return requireAffected(res, "set tag muted")
+}
+
+// CountAdmins returns how many Tags of the Csoport are Admins.
+func (q Queries) CountAdmins(ctx context.Context, csoportID string) (int, error) {
+	var n int
+	err := q.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM tag WHERE csoport_id = ? AND is_admin = 1`, csoportID).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("count admins: %w", err)
+	}
+	return n, nil
+}
+
+// CountTags returns how many Tags the Csoport has.
+func (q Queries) CountTags(ctx context.Context, csoportID string) (int, error) {
+	var n int
+	err := q.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tag WHERE csoport_id = ?`, csoportID).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("count tags: %w", err)
+	}
+	return n, nil
+}
+
+// IsSzervezoOfActiveEsemeny tells whether the Felhasznalo is the Szervezo of
+// an Esemeny of the Csoport that is Egyeztetes or Veglegesitve.
+func (q Queries) IsSzervezoOfActiveEsemeny(ctx context.Context, csoportID, felhasznaloID string) (bool, error) {
+	var found bool
+	err := q.db.QueryRowContext(ctx,
+		`SELECT EXISTS (SELECT 1 FROM esemeny
+		                WHERE csoport_id = ? AND szervezo_id = ? AND allapot IN ('egyeztetes', 'veglegesitve'))`,
+		csoportID, felhasznaloID).Scan(&found)
+	if err != nil {
+		return false, fmt.Errorf("find active esemeny of szervezo: %w", err)
+	}
+	return found, nil
+}
+
+func requireAffected(res sql.Result, what string) error {
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("%s: %w", what, err)
+	}
+	if n == 0 {
+		return ErrNotFound
 	}
 	return nil
 }
