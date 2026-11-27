@@ -35,10 +35,11 @@ Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. Domain terms are
 - **Store:** query methods on `store.Queries`. Use `Store.InTx` for anything that writes several rows.
 - **HTTP API:** each area registers its routes in its own file through `register<Area>(mux)`, and maps its own errors to status codes there. Wrap routes that need the caller with `withFelhasznalo(handler)`. Add `httptest` tests for new routes.
 - **Gateways:** outbound integrations go behind interfaces in `gateway/`, with recording fakes in `gateway/gatewayfake`. Extend those; never call real APIs in tests.
+- **Kiegészítők:** to add one, follow the "How to add a Kiegeszito" recipe in the doc comment at the top of `app/kiegeszito.go`. It covers the registry entry, releasers, summary fragments, guards, error codes and the web panel registry.
 - **Off limits:** never touch Better Auth's tables (`user`, `session`, `account`, `verification`).
 
 **Frontend (`squadsync-fe/src/`)**
-- **Calling Go:** only from server code, through `lib/backend.ts`. Keep its types in sync with Go by hand.
+- **Calling Go:** only from server code, through `lib/backend.ts` (`callBackend`). Each Kiegészítő keeps its own calls in `lib/kiegeszito/<kind>.ts`, built on the exported `callBackend`. Keep the types in sync with Go by hand.
 - **Reads and writes:** reads are side-effect free and wrapped in React `cache()`. Writes happen only in server actions or route handlers, never while rendering.
 - **Next.js 16:** check `squadsync-fe/node_modules/next/dist/docs/` for anything to do with `cacheComponents`, Suspense or route handlers. In route handlers, `unstable_rethrow` is needed inside `catch` blocks.
 

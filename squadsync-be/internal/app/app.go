@@ -12,6 +12,7 @@ import (
 	"log/slog"
 
 	"squadsync-be/internal/clock"
+	"squadsync-be/internal/domain"
 	"squadsync-be/internal/gateway"
 	"squadsync-be/internal/store"
 )
@@ -66,6 +67,8 @@ type App struct {
 	// testDurableJobs are durable job kinds that only tests register
 	// (export_test.go).
 	testDurableJobs map[jobKind]durableJobHandler
+	// kiegeszitok are the registered Kiegeszitok (see registerKiegeszito).
+	kiegeszitok map[domain.KiegeszitoKind]kiegeszito
 }
 
 // New builds the application core.
@@ -79,6 +82,7 @@ func New(d Deps) *App {
 		discordOAuth: d.DiscordOAuth,
 		webURL:       d.WebURL,
 		log:          d.Log,
+		kiegeszitok:  copyKiegeszitoRegistry(),
 	}
 	if a.log == nil {
 		a.log = slog.New(slog.DiscardHandler)

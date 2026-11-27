@@ -21,6 +21,8 @@ import {
 } from "../format";
 import { CancelEsemeny } from "./cancel-esemeny";
 import { HataridoForm } from "./hatarido-form";
+import { kiegeszitoHibaText } from "./kiegeszitok/registry";
+import { KiegeszitokSection } from "./kiegeszitok/section";
 import { IdopontRaeresLine } from "./raeres-line";
 
 export default function EsemenyPage({
@@ -67,6 +69,9 @@ async function Esemeny({
   const isSzervezo = esemeny.szervezoId === felhasznalo.id;
   const hasResztvevok =
     esemeny.allapot === "veglegesitve" || esemeny.allapot === "lezajlott";
+  const notice = isAllapotHiba(hiba)
+    ? hibaText[hiba]
+    : kiegeszitoHibaText(hiba);
 
   return (
     <>
@@ -90,12 +95,12 @@ async function Esemeny({
         ) : null}
       </div>
 
-      {isAllapotHiba(hiba) ? (
+      {notice !== null ? (
         <p
           role="alert"
           className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
         >
-          {hibaText[hiba]}
+          {notice}
         </p>
       ) : null}
 
@@ -148,6 +153,12 @@ async function Esemeny({
           ))}
         </ul>
       </section>
+
+      <KiegeszitokSection
+        esemeny={esemeny}
+        felhasznaloId={felhasznalo.id}
+        isSzervezo={isSzervezo}
+      />
     </>
   );
 }

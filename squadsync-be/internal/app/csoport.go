@@ -149,12 +149,20 @@ func (a *App) SetAdmin(ctx context.Context, felhasznaloID, csoportID, targetID s
 // gets ErrNotAdmin, anyone else ErrNotFound, as does a target who isn't a
 // Tag. A Szervezo of an active Esemeny gives ErrSzervezoOfActiveEsemeny.
 func (a *App) RemoveTag(ctx context.Context, felhasznaloID, csoportID, targetID string) error {
-	return a.store.InTx(ctx, func(q store.Queries) error {
+	var left tagLeft
+	err := a.store.InTx(ctx, func(q store.Queries) error {
 		if err := requireAdmin(ctx, q, csoportID, felhasznaloID); err != nil {
 			return err
 		}
-		return deleteTag(ctx, q, csoportID, targetID)
+		var err error
+		left, err = a.deleteTag(ctx, q, csoportID, targetID)
+		return err
 	})
+	if err != nil {
+		return err
+	}
+	a.afterTagLeft(left)
+	return nil
 }
 
 // LeaveCsoport ends the Felhasznalo's own Tag. Any Tag may leave; anyone else
@@ -164,11 +172,20 @@ func (a *App) RemoveTag(ctx context.Context, felhasznaloID, csoportID, targetID 
 // Szervezo of an active Esemeny gets ErrSzervezoOfActiveEsemeny. When the
 // last Tag leaves, the Csoport simply has no Tags; the next Felhasznalo to
 // join it becomes its Admin (see JoinCsoport). The leaver's Visszajelzesek
-// stay, but no longer count.
+// stay, but no longer count, and their claims in the Kiegeszitok are
+// released (see deleteTag).
 func (a *App) LeaveCsoport(ctx context.Context, felhasznaloID, csoportID string) error {
-	return a.store.InTx(ctx, func(q store.Queries) error {
-		return deleteTag(ctx, q, csoportID, felhasznaloID)
+	var left tagLeft
+	err := a.store.InTx(ctx, func(q store.Queries) error {
+		var err error
+		left, err = a.deleteTag(ctx, q, csoportID, felhasznaloID)
+		return err
 	})
+	if err != nil {
+		return err
+	}
+	a.afterTagLeft(left)
+	return nil
 }
 
 // SetMuted mutes or unmutes the Felhasznalo's own DMs from the Csoport.
@@ -182,34 +199,83 @@ func (a *App) SetMuted(ctx context.Context, felhasznaloID, csoportID string, mut
 	})
 }
 
+// tagLeft is what a Tag leaving changed beyond the Tag itself: the
+// Esemenyek whose Resztvevo they were, and the Kiegeszito jobs their
+// released claims queued.
+type tagLeft struct {
+	esemenyIDs []string
+	jobs       []kiegeszitoJob
+}
+
+// afterTagLeft runs the released claims' jobs and re-renders the Esemenyek
+// the Tag was a Resztvevo of, once the change commits.
+func (a *App) afterTagLeft(left tagLeft) {
+	if len(left.esemenyIDs) == 0 {
+		return
+	}
+	a.afterCommit(func(ctx context.Context) {
+		a.runKiegeszitoJobs(ctx, left.jobs)
+		for _, id := range left.esemenyIDs {
+			a.refreshEsemenyMessages(ctx, id)
+		}
+	})
+}
+
 // deleteTag removes the target's Tag unless that would leave the Csoport
-// without an Admin or an active Esemeny without its Szervezo.
-func deleteTag(ctx context.Context, q store.Queries, csoportID, targetID string) error {
+// without an Admin or an active Esemeny without its Szervezo. Someone who
+// is no longer a Tag is no Resztvevo, so in every Veglegesitve Esemeny of
+// the Csoport they were a Resztvevo of, their claims in the Kiegeszitok are
+// released first, as on a drop-out (without the Szervezo's DM).
+func (a *App) deleteTag(ctx context.Context, q store.Queries, csoportID, targetID string) (tagLeft, error) {
 	target, err := requireTag(ctx, q, csoportID, targetID)
 	if err != nil {
-		return err
+		return tagLeft{}, err
 	}
 	if target.Admin {
 		// A lone Tag has nobody to hand the role to, and may leave: then the
 		// Csoport just has no Tags.
 		tags, err := q.CountTags(ctx, csoportID)
 		if err != nil {
-			return err
+			return tagLeft{}, err
 		}
 		if tags > 1 {
 			if err := requireOtherAdmin(ctx, q, csoportID); err != nil {
-				return err
+				return tagLeft{}, err
 			}
 		}
 	}
 	szervezo, err := q.IsSzervezoOfActiveEsemeny(ctx, csoportID, targetID)
 	if err != nil {
-		return err
+		return tagLeft{}, err
 	}
 	if szervezo {
-		return ErrSzervezoOfActiveEsemeny
+		return tagLeft{}, ErrSzervezoOfActiveEsemeny
 	}
-	return q.DeleteTag(ctx, csoportID, targetID)
+	esemenyek, err := q.ListEsemenyekOfCsoport(ctx, csoportID)
+	if err != nil {
+		return tagLeft{}, err
+	}
+	var left tagLeft
+	holder := domain.ClaimHolder{FelhasznaloID: targetID}
+	for _, s := range esemenyek {
+		if s.Allapot != domain.Veglegesitve {
+			continue
+		}
+		resztvevo, err := isResztvevo(ctx, q, s.Esemeny, holder)
+		if err != nil {
+			return tagLeft{}, err
+		}
+		if !resztvevo {
+			continue
+		}
+		_, jobs, err := a.releaseDropOut(ctx, q, s.Esemeny, targetID)
+		if err != nil {
+			return tagLeft{}, err
+		}
+		left.esemenyIDs = append(left.esemenyIDs, s.ID)
+		left.jobs = append(left.jobs, jobs...)
+	}
+	return left, q.DeleteTag(ctx, csoportID, targetID)
 }
 
 // requireOtherAdmin gives ErrLastAdmin unless the Csoport has at least two
