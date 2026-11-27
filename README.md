@@ -110,11 +110,10 @@ make lint   # cd squadsync-fe && bun run lint && bunx tsc --noEmit
    - Rendering never mutates. Pages only read, through `getCurrentFelhasznalo`.
 4. **Linking.** Better Auth's own account linking is turned off. Linking more Discord accounts belongs to Go (ADR-0002):
    - On `/fiok`, the "Másik Discord fiók kapcsolása" button posts to `/fiok/discord/kapcsolas`. That route stores a random `state` in an httpOnly cookie bound to the Felhasználó, and sends the browser to Discord (scope `identify`, `prompt=consent`, so you can switch to the other account with "Not you?").
-   - Discord redirects to `/fiok/discord/callback`. The route checks the state, then forwards the code and the redirect URI to `POST /felhasznalo/discord-account`. Go exchanges the code with Discord (`gateway.DiscordOAuth`) and records the link.
+   - Discord redirects to `/fiok/discord/callback`. The route checks the state, then forwards the code to `POST /felhasznalo/discord-account`. Go exchanges the code with Discord (`gateway.DiscordOAuth`), using the redirect URI it builds from its own `BETTER_AUTH_URL`, and records the link. Without the Discord credentials or `BETTER_AUTH_URL`, Go answers 503 and `/fiok` says linking isn't available.
    - An account of a Felhasználó with a Tag or any other data is refused ("Ez a fiók már használatban van."). One whose Felhasználó has nothing else (they only logged in once) is moved over, that empty Felhasználó is removed, and Next.js ends its Better Auth sessions.
    - Extra accounts can be unlinked on `/fiok`; the main one can't.
-5. **Web login with a linked account is refused.** Better Auth's `user.validateUserInfo` (`squadsync-fe/src/lib/web-login-guard.ts`) asks Go's secret-only `GET /discord-account/{discordId}/web-login`. It runs before Better Auth creates a user and before it creates the session of an existing one, so a linked account gets neither. The refusal ("Ez a fiók X-hez van kapcsolva, lépj be azzal.") is shown on the home page.
-6. **DMs** to a Felhasználó go to every linked account: use `App.SendDMToFelhasznalo`.
+5. **Web login with a linked account is refused.** Better Auth's `user.validateUserInfo` (`squadsync-fe/src/lib/web-login-guard.ts`) asks Go's secret-only `GET /discord-account/{discordId}/web-login`. It runs before Better Auth creates a user and before it creates the session of an existing one, so a linked account gets neither. The refusal ("Ez a fiók X-hez van kapcsolva, lépj be azzal.") is shown on the home page. The redirect URL carries only the Discord id signed with `BETTER_AUTH_SECRET`; the home page verifies it and asks Go for the message again, so no text from the URL is ever shown.
 
 ## Go backend layout
 

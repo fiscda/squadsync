@@ -12,8 +12,9 @@ import { requireFelhasznalo } from "./felhasznalo";
 //      Discord's authorize page.
 //   2. Discord sends the browser back to /fiok/discord/callback with a code
 //      and the state. The route checks the state against the cookie and
-//      forwards the code and the redirect URI to Go.
-//   3. Go exchanges the code with Discord and records the link.
+//      forwards the code to Go.
+//   3. Go exchanges the code with Discord, with the same redirect URI built
+//      from its own BETTER_AUTH_URL, and records the link.
 //
 // The redirect URI below must be registered in the Discord application
 // (see README.md).
@@ -25,7 +26,10 @@ export const LINK_STATE_MAX_AGE = 10 * 60;
 /** The cookie is sent only to the linking routes. */
 export const LINK_STATE_PATH = "/fiok/discord";
 
-/** Where Discord sends the browser back after the linking flow. */
+/**
+ * Where Discord sends the browser back after the linking flow. Go builds the
+ * same URI for the code exchange (app.LinkRedirectURI).
+ */
 export function linkRedirectUri(): string {
   return `${publicUrl()}/fiok/discord/callback`;
 }
@@ -83,11 +87,14 @@ export function linkStateMatches(
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-/** Discord's authorize page for linking, asking only for `identify`. */
-export function discordAuthorizeUrl(state: string): string {
+/**
+ * Discord's authorize page for linking, asking only for `identify`, or null
+ * when the Discord application isn't configured.
+ */
+export function discordAuthorizeUrl(state: string): string | null {
   const clientId = process.env.DISCORD_CLIENT_ID;
   if (!clientId) {
-    throw new Error("DISCORD_CLIENT_ID is not set (see .env.example)");
+    return null;
   }
   const params = new URLSearchParams({
     response_type: "code",

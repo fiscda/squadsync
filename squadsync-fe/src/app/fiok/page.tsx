@@ -41,6 +41,10 @@ const kapcsolasMessages: Record<string, { text: string; ok: boolean }> = {
   },
   foglalt: { text: "Ez a fiók már használatban van.", ok: false },
   megszakitva: { text: "A kapcsolást megszakítottad.", ok: false },
+  "nem-elerheto": {
+    text: "A fiókkapcsolás most nem érhető el, mert nincs beállítva. Szólj az oldal gazdájának.",
+    ok: false,
+  },
   hiba: { text: "Nem sikerült a kapcsolás. Próbáld újra.", ok: false },
 };
 

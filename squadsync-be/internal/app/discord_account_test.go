@@ -11,7 +11,8 @@ import (
 	"squadsync-be/internal/gateway"
 )
 
-const redirectURI = "https://squadsync.example/fiok/discord/callback"
+// redirectURI is what Go builds from the harness's public URL.
+const redirectURI = apptest.PublicURL + "/fiok/discord/callback"
 
 // firstLogin logs a new Felhasznalo in to the web with their main account.
 func firstLogin(t *testing.T, h *apptest.Harness, id, discordID, name string) {
@@ -25,7 +26,7 @@ func firstLogin(t *testing.T, h *apptest.Harness, id, discordID, name string) {
 // discordID had authorized the app.
 func link(h *apptest.Harness, felhasznaloID, discordID, name string) (app.LinkResult, error) {
 	code := h.DiscordOAuth.Authorize("code-for-"+discordID, gateway.DiscordIdentity{ID: discordID, Name: name})
-	return h.App.LinkDiscordAccount(context.Background(), felhasznaloID, code, redirectURI)
+	return h.App.LinkDiscordAccount(context.Background(), felhasznaloID, code)
 }
 
 func discordIDs(t *testing.T, h *apptest.Harness, felhasznaloID string) []string {
@@ -194,7 +195,7 @@ func TestLinkingWithACodeDiscordRefuses(t *testing.T) {
 	h := apptest.New(t)
 	firstLogin(t, h, "anna", "d-anna", "Anna")
 
-	_, err := h.App.LinkDiscordAccount(context.Background(), "anna", "stale-code", redirectURI)
+	_, err := h.App.LinkDiscordAccount(context.Background(), "anna", "stale-code")
 	if !errors.Is(err, app.ErrDiscordCodeRejected) || !errors.Is(err, app.ErrInvalidInput) {
 		t.Fatalf("err = %v, want ErrDiscordCodeRejected (an ErrInvalidInput)", err)
 	}
@@ -206,11 +207,11 @@ func TestLinkingNeedsAKnownFelhasznaloAndInput(t *testing.T) {
 	ctx := context.Background()
 	code := h.DiscordOAuth.Authorize("c", gateway.DiscordIdentity{ID: "d-x", Name: "X"})
 
-	if _, err := h.App.LinkDiscordAccount(ctx, "nobody", code, redirectURI); !errors.Is(err, app.ErrNotFound) {
+	if _, err := h.App.LinkDiscordAccount(ctx, "nobody", code); !errors.Is(err, app.ErrNotFound) {
 		t.Fatalf("unknown Felhasznalo: err = %v, want ErrNotFound", err)
 	}
 	firstLogin(t, h, "anna", "d-anna", "Anna")
-	if _, err := h.App.LinkDiscordAccount(ctx, "anna", " ", redirectURI); !errors.Is(err, app.ErrInvalidInput) {
+	if _, err := h.App.LinkDiscordAccount(ctx, "anna", " "); !errors.Is(err, app.ErrInvalidInput) {
 		t.Fatalf("empty code: err = %v, want ErrInvalidInput", err)
 	}
 	if len(h.DiscordOAuth.Exchanges()) != 0 {
@@ -286,25 +287,16 @@ func TestWebLoginIsRefusedForALinkedAccount(t *testing.T) {
 	}
 }
 
-func TestDMsGoToEveryLinkedAccount(t *testing.T) {
+func TestLinkingIsUnavailableWithoutAPublicURL(t *testing.T) {
 	h := apptest.New(t)
-	ctx := context.Background()
 	firstLogin(t, h, "anna", "d-anna", "Anna")
-	firstLogin(t, h, "bela", "d-bela", "Béla")
-	if _, err := link(h, "anna", "d-anna-phone", "Anna telefon"); err != nil {
-		t.Fatalf("link: %v", err)
-	}
+	a := app.New(app.Deps{Store: h.Store, Clock: h.Clock, Discord: h.Discord, DiscordOAuth: h.DiscordOAuth})
+	code := h.DiscordOAuth.Authorize("c", gateway.DiscordIdentity{ID: "d-x", Name: "X"})
 
-	if err := h.App.SendDMToFelhasznalo(ctx, "anna", "Holnap játék!"); err != nil {
-		t.Fatalf("SendDMToFelhasznalo: %v", err)
+	if _, err := a.LinkDiscordAccount(context.Background(), "anna", code); !errors.Is(err, gateway.ErrNotConfigured) {
+		t.Fatalf("err = %v, want gateway.ErrNotConfigured", err)
 	}
-
-	for _, id := range []string{"d-anna", "d-anna-phone"} {
-		if dms := h.Discord.DMsTo(id); len(dms) != 1 || dms[0].Content != "Holnap játék!" {
-			t.Fatalf("DMs to %s = %+v, want the one message", id, dms)
-		}
-	}
-	if n := len(h.Discord.DMs()); n != 2 {
-		t.Fatalf("%d DMs sent, want 2 (none to Béla)", n)
+	if len(h.DiscordOAuth.Exchanges()) != 0 {
+		t.Fatalf("Discord was asked anyway: %+v", h.DiscordOAuth.Exchanges())
 	}
 }

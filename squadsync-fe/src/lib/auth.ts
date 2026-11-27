@@ -17,7 +17,11 @@ export const auth = betterAuth({
     // orphan user from before the account was linked), so neither happens.
     // The refusal redirects to the errorCallbackURL (see discordLoginUrl).
     validateUserInfo: ({ source }) =>
-      refuseLinkedDiscordAccount(source, checkWebLogin),
+      refuseLinkedDiscordAccount(
+        source,
+        checkWebLogin,
+        process.env.BETTER_AUTH_SECRET ?? "",
+      ),
   },
   account: {
     // Better Auth handles only web login with the main Discord account. Go

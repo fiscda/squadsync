@@ -5,13 +5,18 @@ import { linkDiscordAccount } from "@/lib/backend";
 import {
   LINK_STATE_COOKIE,
   LINK_STATE_PATH,
-  linkRedirectUri,
   linkStateMatches,
 } from "@/lib/discord-link";
 import { getCurrentFelhasznalo } from "@/lib/felhasznalo";
 
 /** The outcomes /fiok explains, passed as `?kapcsolas=`. */
-type KapcsolasResult = "ok" | "mar-a-tied" | "foglalt" | "megszakitva" | "hiba";
+type KapcsolasResult =
+  | "ok"
+  | "mar-a-tied"
+  | "foglalt"
+  | "megszakitva"
+  | "nem-elerheto"
+  | "hiba";
 
 // Discord sends the browser back here at the end of linking a further
 // Discord account (see lib/discord-link.ts). The state must match the
@@ -58,24 +63,32 @@ async function finishLinking(
     return "hiba";
   }
 
-  const outcome = await linkDiscordAccount(felhasznaloId, {
-    code,
-    redirectUri: linkRedirectUri(),
-  });
+  const outcome = await linkDiscordAccount(felhasznaloId, code);
   switch (outcome.status) {
     case "in-use":
       return "foglalt";
     case "code-rejected":
       return "hiba";
+    case "unavailable":
+      return "nem-elerheto";
     case "linked":
       if (outcome.removedFelhasznaloId) {
-        // Go removed the empty Felhasználó the account was taken from. End
-        // the sessions of its Better Auth user, which no longer means anyone.
-        const ctx = await auth.$context;
-        await ctx.internalAdapter.deleteUserSessions(
-          outcome.removedFelhasznaloId,
-        );
+        await endSessionsOf(outcome.removedFelhasznaloId);
       }
       return outcome.alreadyLinked ? "mar-a-tied" : "ok";
+  }
+}
+
+/**
+ * Go removed the empty Felhasználó the account was taken from: end the
+ * sessions of its Better Auth user, which no longer means anyone. The link
+ * already succeeded, so a failure here is only logged.
+ */
+async function endSessionsOf(userId: string): Promise<void> {
+  try {
+    const ctx = await auth.$context;
+    await ctx.internalAdapter.deleteUserSessions(userId);
+  } catch (err) {
+    console.error("ending the sessions of a removed Felhasználó failed", err);
   }
 }

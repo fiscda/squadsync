@@ -21,6 +21,9 @@ import (
 	"squadsync-be/internal/store"
 )
 
+// PublicURL is the web app's public URL the harness configures.
+const PublicURL = "https://squadsync.example"
+
 // Start is where the fake clock starts: a fixed, ordinary moment in UTC.
 var Start = time.Date(2026, time.March, 2, 9, 0, 0, 0, time.UTC)
 
@@ -60,6 +63,7 @@ func New(t testing.TB) *Harness {
 		Spotify:  h.Spotify,
 
 		DiscordOAuth: h.DiscordOAuth,
+		PublicURL:    PublicURL,
 	})
 	return h
 }

@@ -29,7 +29,7 @@ type webLoginResp struct {
 }
 
 func linkRequest(code string) string {
-	return `{"code":"` + code + `","redirectUri":"http://localhost:3000/fiok/discord/callback"}`
+	return `{"code":"` + code + `"}`
 }
 
 func TestLinkListAndUnlinkDiscordAccountsOverHTTP(t *testing.T) {
@@ -48,6 +48,10 @@ func TestLinkListAndUnlinkDiscordAccountsOverHTTP(t *testing.T) {
 	expectStatus(t, call(t, api, http.MethodPost, "/felhasznalo/discord-account", linkRequest("phone"), map[string]string{httpapi.HeaderSecret: secret}), http.StatusBadRequest)
 
 	got := decode[linkResp](t, call(t, api, http.MethodPost, "/felhasznalo/discord-account", linkRequest("phone"), as("anna")))
+	// Go used its own redirect URI, not one from the request.
+	if ex := h.DiscordOAuth.Exchanges(); len(ex) != 1 || ex[0].RedirectURI != apptest.PublicURL+"/fiok/discord/callback" {
+		t.Fatalf("exchanges = %+v, want one with Go's redirect URI", ex)
+	}
 	if got.Account.DiscordID != "d-anna-phone" || got.Account.Main || got.AlreadyLinked || got.RemovedFelhasznaloID != "" {
 		t.Fatalf("link = %+v, want a new linked account d-anna-phone", got)
 	}

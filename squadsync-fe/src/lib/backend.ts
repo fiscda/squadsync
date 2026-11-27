@@ -135,22 +135,25 @@ export type LinkOutcome =
   /** The account belongs to a Felhasználó with a Tag or other data. */
   | { status: "in-use" }
   /** Discord refused the code (expired, reused, wrong redirect URI). */
-  | { status: "code-rejected" };
+  | { status: "code-rejected" }
+  /** Go isn't configured for linking (no Discord credentials or URL). */
+  | { status: "unavailable" };
 
 /**
  * Finishes linking a further Discord account: Go exchanges the code from
- * Discord's redirect with Discord, then records the link.
+ * Discord's redirect with Discord, using its own redirect URI
+ * (BETTER_AUTH_URL + /fiok/discord/callback), then records the link.
  */
 export async function linkDiscordAccount(
   felhasznaloId: string,
-  input: { code: string; redirectUri: string },
+  code: string,
 ): Promise<LinkOutcome> {
   try {
     const result = await callBackend<{
       account: DiscordAccount;
       alreadyLinked: boolean;
       removedFelhasznaloId: string;
-    }>(felhasznaloId, "POST", "/felhasznalo/discord-account", input);
+    }>(felhasznaloId, "POST", "/felhasznalo/discord-account", { code });
     return { status: "linked", ...result };
   } catch (err) {
     if (err instanceof BackendError && err.status === 409) {
@@ -158,6 +161,9 @@ export async function linkDiscordAccount(
     }
     if (err instanceof BackendError && err.status === 400) {
       return { status: "code-rejected" };
+    }
+    if (err instanceof BackendError && err.status === 503) {
+      return { status: "unavailable" };
     }
     throw err;
   }

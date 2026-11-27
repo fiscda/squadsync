@@ -34,6 +34,9 @@ type Deps struct {
 	Spotify  gateway.Spotify
 	// DiscordOAuth identifies Discord accounts being linked (ADR-0002).
 	DiscordOAuth gateway.DiscordOAuth
+	// PublicURL is the web app's public URL (BETTER_AUTH_URL), which the
+	// linking flow's redirect URI is built from. Empty disables linking.
+	PublicURL string
 }
 
 // App runs the use cases.
@@ -45,6 +48,7 @@ type App struct {
 	spotify  gateway.Spotify
 
 	discordOAuth gateway.DiscordOAuth
+	publicURL    string
 }
 
 // New builds the application core.
@@ -57,5 +61,6 @@ func New(d Deps) *App {
 		spotify:  d.Spotify,
 
 		discordOAuth: d.DiscordOAuth,
+		publicURL:    d.PublicURL,
 	}
 }

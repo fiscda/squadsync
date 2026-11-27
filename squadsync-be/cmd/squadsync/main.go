@@ -14,6 +14,7 @@
 //	DISCORD_BOT_TOKEN    the bot's token; without it Go runs without the bot
 //	DISCORD_DEV_GUILD_ID register slash commands on this server only (optional)
 //	BETTER_AUTH_URL      public URL of the web app, for login links (required with the bot)
+//	                     and the linking flow's redirect URI
 //	DISCORD_CLIENT_ID    the Discord application's OAuth2 client id, for linking
 //	DISCORD_CLIENT_SECRET  and its secret; without both, linking is unavailable
 package main
@@ -105,13 +106,13 @@ func run(log *slog.Logger, args []string) error {
 	}
 
 	var discordOAuth gateway.DiscordOAuth = gateway.Disabled{}
-	if cfg.discordClientID != "" && cfg.discordClientSecret != "" {
+	if cfg.discordClientID != "" && cfg.discordClientSecret != "" && cfg.publicURL != "" {
 		discordOAuth = &gateway.DiscordOAuthClient{
 			ClientID:     cfg.discordClientID,
 			ClientSecret: cfg.discordClientSecret,
 		}
 	} else {
-		log.Info("DISCORD_CLIENT_ID or DISCORD_CLIENT_SECRET is not set: linking Discord accounts is unavailable")
+		log.Info("DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET or BETTER_AUTH_URL is not set: linking Discord accounts is unavailable")
 	}
 
 	a := app.New(app.Deps{
@@ -122,6 +123,7 @@ func run(log *slog.Logger, args []string) error {
 		Spotify:  gateway.Disabled{},
 
 		DiscordOAuth: discordOAuth,
+		PublicURL:    cfg.publicURL,
 	})
 
 	if session == nil {

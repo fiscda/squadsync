@@ -1,11 +1,8 @@
 import Link from "next/link";
 import { Suspense } from "react";
 import { getCurrentFelhasznalo } from "@/lib/felhasznalo";
+import { loginErrorMessage } from "@/lib/login-error";
 import { buttonClass, secondaryButtonClass } from "@/lib/ui";
-import {
-  LINKED_ACCOUNT_ERROR,
-  LOGIN_CHECK_FAILED_ERROR,
-} from "@/lib/web-login-guard";
 import { retryFirstLogin, signInWithDiscord, signOut } from "./actions";
 
 export default function Home({ searchParams }: PageProps<"/">) {
@@ -31,23 +28,22 @@ function first(v: string | string[] | undefined): string | undefined {
   return Array.isArray(v) ? v[0] : v;
 }
 
-// A refused login comes back here with ?error= (see discordLoginUrl). Our
-// own refusals carry their message; any other error gets a generic one.
-function LoginError({
+// A refused login comes back here with ?error= (see discordLoginUrl). The
+// text never comes from the URL (see lib/login-error.ts).
+async function LoginError({
   error,
   description,
 }: {
   error?: string;
   description?: string;
 }) {
-  if (!error) {
+  const message = await loginErrorMessage(error, description);
+  if (!message) {
     return null;
   }
-  const ours =
-    error === LINKED_ACCOUNT_ERROR || error === LOGIN_CHECK_FAILED_ERROR;
   return (
     <p role="alert" className="text-lg text-red-700 dark:text-red-400">
-      {ours && description ? description : "A belépés nem sikerült."}
+      {message}
     </p>
   );
 }

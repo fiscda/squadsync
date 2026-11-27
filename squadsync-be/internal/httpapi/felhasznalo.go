@@ -90,17 +90,17 @@ func (s *server) listDiscordAccounts(w http.ResponseWriter, r *http.Request, fel
 }
 
 // linkDiscordAccount finishes the linking flow: Next.js forwards the code
-// from Discord's redirect and the redirect URI it used. 409 means the
-// account belongs to someone with data; 400 means Discord refused the code.
+// from Discord's redirect. 409 means the account belongs to someone with
+// data; 400 means Discord refused the code; 503 means linking isn't
+// configured.
 func (s *server) linkDiscordAccount(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
 	var body struct {
-		Code        string `json:"code"`
-		RedirectURI string `json:"redirectUri"`
+		Code string `json:"code"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	res, err := s.app.LinkDiscordAccount(r.Context(), felhasznaloID, body.Code, body.RedirectURI)
+	res, err := s.app.LinkDiscordAccount(r.Context(), felhasznaloID, body.Code)
 	if err != nil {
 		s.writeFelhasznaloError(w, r, err)
 		return

@@ -146,7 +146,7 @@ func (q Queries) FelhasznaloHasData(ctx context.Context, id string) (bool, error
 	rows, err := q.db.QueryContext(ctx, `
 		SELECT m.name, fk."from"
 		FROM sqlite_schema AS m, pragma_foreign_key_list(m.name) AS fk
-		WHERE m.type = 'table' AND fk."table" = 'felhasznalo' AND m.name <> 'discord_account'
+		WHERE m.type = 'table' AND lower(fk."table") = 'felhasznalo' AND m.name <> 'discord_account'
 		ORDER BY m.name, fk."from"`)
 	if err != nil {
 		return false, fmt.Errorf("list references to felhasznalo: %w", err)

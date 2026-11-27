@@ -131,6 +131,23 @@ func (a *App) DiscordAccounts(ctx context.Context, felhasznaloID string) ([]doma
 	return a.store.ListDiscordAccounts(ctx, felhasznaloID)
 }
 
+// LinkCallbackPath is the Next.js route Discord redirects to at the end of
+// the linking flow. It must be registered as a redirect in the Discord
+// application (README.md).
+const LinkCallbackPath = "/fiok/discord/callback"
+
+// LinkRedirectURI is the redirect URI of the linking flow: the public URL of
+// the web app plus LinkCallbackPath. Go owns it, so a caller can't make Go
+// exchange a code for another redirect URI. It fails with
+// gateway.ErrNotConfigured when the public URL isn't set.
+func (a *App) LinkRedirectURI() (string, error) {
+	base := strings.TrimRight(strings.TrimSpace(a.publicURL), "/")
+	if base == "" {
+		return "", fmt.Errorf("public url for the link redirect: %w", gateway.ErrNotConfigured)
+	}
+	return base + LinkCallbackPath, nil
+}
+
 // LinkResult is the outcome of linking a Discord account.
 type LinkResult struct {
 	// Account is the linked account, now one of the Felhasznalo's.
@@ -144,9 +161,9 @@ type LinkResult struct {
 }
 
 // LinkDiscordAccount links a further Discord account to a Felhasznalo
-// (ADR-0002). code and redirectURI come from the Discord OAuth flow that
-// Next.js ran; Go exchanges the code with Discord to learn which account
-// authorized it.
+// (ADR-0002). code comes from the Discord OAuth flow that Next.js ran, whose
+// redirect URI is LinkRedirectURI; Go exchanges the code with Discord to
+// learn which account authorized it.
 //
 //   - An account that is already theirs changes nothing.
 //   - An account that belongs to another Felhasznalo who has a Tag or any
@@ -157,13 +174,16 @@ type LinkResult struct {
 //
 // It fails with ErrNotFound for an unknown Felhasznalo and with
 // ErrDiscordCodeRejected when Discord refuses the code.
-func (a *App) LinkDiscordAccount(ctx context.Context, felhasznaloID, code, redirectURI string) (LinkResult, error) {
+func (a *App) LinkDiscordAccount(ctx context.Context, felhasznaloID, code string) (LinkResult, error) {
 	code = strings.TrimSpace(code)
-	redirectURI = strings.TrimSpace(redirectURI)
-	if code == "" || redirectURI == "" {
-		return LinkResult{}, fmt.Errorf("%w: code and redirect uri are required", ErrInvalidInput)
+	if code == "" {
+		return LinkResult{}, fmt.Errorf("%w: code is required", ErrInvalidInput)
 	}
 	if _, err := a.Felhasznalo(ctx, felhasznaloID); err != nil {
+		return LinkResult{}, err
+	}
+	redirectURI, err := a.LinkRedirectURI()
+	if err != nil {
 		return LinkResult{}, err
 	}
 
@@ -327,24 +347,4 @@ func (a *App) WebLogin(ctx context.Context, discordID string) (WebLoginDecision,
 		name = f.Name
 	}
 	return WebLoginDecision{Allowed: false, MainAccountName: name}, nil
-}
-
-// SendDMToFelhasznalo sends a direct message to a Felhasznalo on every one of their
-// Discord accounts, on purpose: someone with two accounts gets it twice, so
-// it reaches whichever device they are using (ADR-0002).
-//
-// It tries every account even if one fails, and returns the failures joined.
-// A Felhasznalo with no Discord account gets nothing, without error.
-func (a *App) SendDMToFelhasznalo(ctx context.Context, felhasznaloID, content string) error {
-	accounts, err := a.store.ListDiscordAccounts(ctx, felhasznaloID)
-	if err != nil {
-		return err
-	}
-	var errs []error
-	for _, acc := range accounts {
-		if err := a.discord.SendDM(ctx, acc.DiscordID, content); err != nil {
-			errs = append(errs, fmt.Errorf("DM to discord account %s: %w", acc.DiscordID, err))
-		}
-	}
-	return errors.Join(errs...)
 }

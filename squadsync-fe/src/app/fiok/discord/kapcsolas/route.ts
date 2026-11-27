@@ -19,10 +19,14 @@ export async function POST(request: Request) {
   }
 
   const linkState = newLinkState(current.felhasznalo.id);
-  const response = NextResponse.redirect(
-    discordAuthorizeUrl(linkState.state),
-    303,
-  );
+  const authorizeUrl = discordAuthorizeUrl(linkState.state);
+  if (!authorizeUrl) {
+    return NextResponse.redirect(
+      new URL("/fiok?kapcsolas=nem-elerheto", request.url),
+      303,
+    );
+  }
+  const response = NextResponse.redirect(authorizeUrl, 303);
   response.cookies.set(LINK_STATE_COOKIE, encodeLinkState(linkState), {
     httpOnly: true,
     secure: isHttps(),

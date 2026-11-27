@@ -298,7 +298,7 @@ func TestALinkedDiscordAccountActsAsItsMainFelhasznalo(t *testing.T) {
 	w := newWorld(t)
 	ctx := context.Background()
 	code := w.h.DiscordOAuth.Authorize("phone", gateway.DiscordIdentity{ID: "d-anna-phone", Name: "Anna telefon"})
-	if _, err := w.h.App.LinkDiscordAccount(ctx, "anna", code, "http://localhost:3000/fiok/discord/callback"); err != nil {
+	if _, err := w.h.App.LinkDiscordAccount(ctx, "anna", code); err != nil {
 		t.Fatalf("LinkDiscordAccount: %v", err)
 	}
 
