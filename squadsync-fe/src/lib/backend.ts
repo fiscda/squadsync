@@ -129,6 +129,18 @@ export type CsoportDetail = Csoport & {
   admin: boolean;
   /** Admins first, then in the order they joined. */
   tags: Tag[];
+  /** The linked Discord channel, or null. */
+  csatorna: Csatorna | null;
+};
+
+/** The Discord channel linked to a Csoport (with /csatorna in Discord). */
+export type Csatorna = {
+  guildId: string;
+  channelId: string;
+  /** Empty when the bot didn't know the channel's name. */
+  channelName: string;
+  /** RFC 3339, UTC */
+  linkedAt: string;
 };
 
 export type CsoportMeghivo = {
@@ -205,6 +217,18 @@ export async function revokeCsoportMeghivo(
     felhasznaloId,
     "DELETE",
     `/csoport/${encodeURIComponent(csoportId)}/meghivo/${encodeURIComponent(meghivoId)}`,
+  );
+}
+
+/** Unlinks the Csoport's Discord channel. Admins only (403 otherwise). */
+export async function unlinkCsatorna(
+  felhasznaloId: string,
+  csoportId: string,
+): Promise<void> {
+  await callBackend<void>(
+    felhasznaloId,
+    "DELETE",
+    `/csoport/${encodeURIComponent(csoportId)}/csatorna`,
   );
 }
 

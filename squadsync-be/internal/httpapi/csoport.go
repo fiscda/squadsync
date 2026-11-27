@@ -16,6 +16,8 @@ func (s *server) registerCsoport(mux *http.ServeMux) {
 	mux.HandleFunc("POST /csoport/{id}/meghivo", withFelhasznalo(s.createCsoportMeghivo))
 	mux.HandleFunc("GET /csoport/{id}/meghivo", withFelhasznalo(s.listCsoportMeghivok))
 	mux.HandleFunc("DELETE /csoport/{id}/meghivo/{meghivoID}", withFelhasznalo(s.revokeCsoportMeghivo))
+	// Linking a channel happens in Discord (/csatorna); the web only unlinks.
+	mux.HandleFunc("DELETE /csoport/{id}/csatorna", withFelhasznalo(s.unlinkCsatorna))
 
 	// Opening a link comes first and needs no Felhasznalo: the join page
 	// shows which Csoport the link is for before the visitor has logged in.
@@ -51,6 +53,16 @@ type csoportDetailJSON struct {
 	// Admin tells whether the caller is an Admin of the Csoport.
 	Admin bool      `json:"admin"`
 	Tags  []tagJSON `json:"tags"`
+	// Csatorna is the linked Discord channel, or null.
+	Csatorna *csatornaJSON `json:"csatorna"`
+}
+
+type csatornaJSON struct {
+	GuildID   string `json:"guildId"`
+	ChannelID string `json:"channelId"`
+	// ChannelName is empty when the bot didn't know the channel's name.
+	ChannelName string    `json:"channelName"`
+	LinkedAt    time.Time `json:"linkedAt"`
 }
 
 type csoportMeghivoJSON struct {
@@ -111,7 +123,19 @@ func (s *server) getCsoport(w http.ResponseWriter, r *http.Request, felhasznaloI
 	for _, t := range d.Tags {
 		tags = append(tags, tagJSON{FelhasznaloID: t.FelhasznaloID, Name: t.FelhasznaloName, Admin: t.Admin, CreatedAt: t.CreatedAt})
 	}
-	writeJSON(w, http.StatusOK, csoportDetailJSON{csoportJSON: toCsoportJSON(d.Csoport), Admin: d.Admin, Tags: tags})
+	out := csoportDetailJSON{csoportJSON: toCsoportJSON(d.Csoport), Admin: d.Admin, Tags: tags}
+	if c := d.Csatorna; c != nil {
+		out.Csatorna = &csatornaJSON{GuildID: c.GuildID, ChannelID: c.ChannelID, ChannelName: c.ChannelName, LinkedAt: c.LinkedAt}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *server) unlinkCsatorna(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
+	if err := s.app.UnlinkCsatorna(r.Context(), felhasznaloID, r.PathValue("id")); err != nil {
+		s.writeCsoportError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *server) createCsoportMeghivo(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
@@ -182,7 +206,7 @@ func (s *server) writeCsoportError(w http.ResponseWriter, r *http.Request, err e
 		writeError(w, http.StatusGone, err.Error())
 		return
 	}
-	if errors.Is(err, app.ErrFelhasznaloUnknown) {
+	if errors.Is(err, app.ErrFelhasznaloUnknown) || errors.Is(err, app.ErrNotAdmin) {
 		writeError(w, http.StatusForbidden, err.Error())
 		return
 	}

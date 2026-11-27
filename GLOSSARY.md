@@ -32,6 +32,10 @@ _Avoid_: Guest, +1, outsider
 A reusable link that makes whoever opens it and logs in a Tag of one Csoport. It never expires by default.
 _Avoid_: Meghívó (alone), invite, join link
 
+**Csatorna**:
+The one Discord channel an Admin has linked to a Csoport, where the bot posts the Csoport's public moments. A Csoport has at most one; without one, everything goes by DM.
+_Avoid_: Channel, Szoba (that word belongs to Szállás)
+
 **Esemény-meghívó**:
 A reusable link that makes whoever opens it and logs in a Vendég of one Esemény. It stops working once the Esemény is Lezajlott or Elmaradt.
 _Avoid_: Meghívó (alone), Vendéglink, guest link

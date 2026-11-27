@@ -47,3 +47,16 @@ type CsoportMeghivo struct {
 
 // Revoked tells whether the link has been revoked.
 func (m CsoportMeghivo) Revoked() bool { return m.RevokedAt != nil }
+
+// Csatorna is the Discord channel linked to a Csoport, where public moments
+// are posted. A Csoport has at most one.
+type Csatorna struct {
+	CsoportID string
+	GuildID   string
+	ChannelID string
+	// ChannelName is the channel's name when it was linked, or empty if it
+	// wasn't known. It is for display only and may be out of date.
+	ChannelName string
+	LinkedBy    string
+	LinkedAt    time.Time
+}

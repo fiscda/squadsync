@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
+import type { CsoportDetail } from "@/lib/backend";
 import { getCsoport, getCsoportMeghivok } from "@/lib/csoport";
 import {
   buttonClass,
@@ -9,7 +10,11 @@ import {
   linkClass,
   secondaryButtonClass,
 } from "@/lib/ui";
-import { createMeghivoAction, revokeMeghivoAction } from "../actions";
+import {
+  createMeghivoAction,
+  revokeMeghivoAction,
+  unlinkCsatornaAction,
+} from "../actions";
 import { CopyLink } from "./copy-link";
 
 export default function CsoportPage({ params }: PageProps<"/csoportok/[id]">) {
@@ -63,8 +68,55 @@ async function Csoport({ csoportId }: { csoportId: string }) {
         </ul>
       </section>
 
+      <CsatornaSection csoport={csoport} />
+
       <MeghivoSection csoportId={csoport.id} />
     </>
+  );
+}
+
+function CsatornaSection({ csoport }: { csoport: CsoportDetail }) {
+  const { csatorna } = csoport;
+  return (
+    <section className="flex flex-col gap-3">
+      <h2 className="text-xl font-semibold">Discord-csatorna</h2>
+      {csatorna ? (
+        <div
+          className={`${cardClass} flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between`}
+        >
+          <div className="flex flex-col gap-1">
+            <span className="font-medium">
+              {csatorna.channelName
+                ? `#${csatorna.channelName}`
+                : `Csatorna azonosító: ${csatorna.channelId}`}
+            </span>
+            <span className="text-xs text-zinc-500">
+              Összekapcsolva: {formatDate(csatorna.linkedAt)}
+            </span>
+          </div>
+          {csoport.admin && (
+            <form action={unlinkCsatornaAction.bind(null, csoport.id)}>
+              <button type="submit" className={secondaryButtonClass}>
+                Leválasztás
+              </button>
+            </form>
+          )}
+        </div>
+      ) : (
+        <p className="text-zinc-500">
+          Nincs Discord-csatorna összekapcsolva, ezért minden értesítés
+          üzenetben (DM) megy.
+        </p>
+      )}
+      {csoport.admin && (
+        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+          Csatornát a Discordban kapcsolhatsz: írd be a{" "}
+          <code className="font-mono">/csatorna</code> parancsot abban a
+          csatornában, ahová a bejelentéseket szeretnéd, és válaszd ki ezt a
+          csoportot. Újra futtatva lecseréli a csatornát.
+        </p>
+      )}
+    </section>
   );
 }
 

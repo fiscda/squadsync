@@ -25,7 +25,20 @@ Every developer uses their own test application.
 4. Under **Redirects**, add `http://localhost:3000/api/auth/callback/discord` and save.
    - In production, add `https://<your domain>/api/auth/callback/discord` too.
 
-Login asks only for the `identify` and `email` scopes, and no bot is needed yet. Discord accounts registered with only a phone number have no email, so they get a placeholder address on the reserved `.invalid` domain. The app never sends email.
+Login asks only for the `identify` and `email` scopes. Discord accounts registered with only a phone number have no email, so they get a placeholder address on the reserved `.invalid` domain. The app never sends email.
+
+### 1b. Add the bot (optional)
+
+Go runs without the bot when `DISCORD_BOT_TOKEN` is empty, so you can skip this until you work on Discord features.
+
+1. In the same application, open **Bot** in the sidebar. Click **Reset Token** and copy the token into `DISCORD_BOT_TOKEN`.
+   - No privileged gateway intents are needed: leave **Presence**, **Server Members** and **Message Content** off.
+   - Optionally, turn off **Public Bot** so only you can add it to servers.
+2. Open **OAuth2** → **OAuth2 URL Generator**. Tick the scopes `bot` and `applications.commands`, then the bot permissions **View Channels**, **Send Messages**, **Embed Links** and **Read Message History**. Open the generated URL and add the bot to your test server. The invite URL has this shape:
+   `https://discord.com/oauth2/authorize?client_id=<CLIENT_ID>&scope=bot+applications.commands&permissions=84992`
+3. For instant slash-command updates, set `DISCORD_DEV_GUILD_ID` to your test server's id: in Discord, turn on **User Settings** → **Advanced** → **Developer Mode**, right-click the server icon and click **Copy Server ID**. Without it, commands are registered globally.
+
+In a channel of that server, an Admin of a Csoport runs `/csatorna` and picks the Csoport to link the channel to it. The Csoport page on the web shows the linked channel, and Admins can unlink it there.
 
 ### 2. Configure the environment
 
@@ -43,6 +56,7 @@ Fill in `.env`:
 | `BETTER_AUTH_SECRET` | The output of `openssl rand -base64 32`. |
 | `BETTER_AUTH_URL` | `http://localhost:3000` |
 | `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` | The values from step 1. |
+| `DISCORD_BOT_TOKEN`, `DISCORD_DEV_GUILD_ID` | Optional: the values from step 1b. |
 
 The Makefile exports everything in `.env` to both servers, so there's no separate `.env` inside `squadsync-fe/` or `squadsync-be/`.
 
@@ -101,6 +115,7 @@ make lint   # cd squadsync-fe && bun run lint && bunx tsc --noEmit
 | `internal/domain` | Plain domain types (`Felhasznalo`, `DiscordAccount`). |
 | `internal/store` | SQLite: open (WAL, busy timeout, `BEGIN IMMEDIATE`), embedded migrations (`migrations/`) and queries. Use `Store.InTx` for transactions. |
 | `internal/httpapi` | The thin internal HTTP API. A global middleware checks the secret, and `withFelhasznalo` requires the Felhasználó id on routes that act for one. Each area registers its routes in its own file with `register<Area>(mux)`. |
+| `internal/bot` | The Discord bot: a thin adapter like `httpapi`. Its `Router` resolves every interaction to a Felhasználó, then routes slash commands by name and buttons and modals by custom-id prefix (`name:arg:arg`). See the package comment for how to add a handler. `bot.Messenger` is the real `gateway.DiscordMessenger`. |
 | `internal/gateway` | Outbound interfaces: Discord messaging, Google Calendar and Spotify. |
 | `internal/gateway/gatewayfake` | Recording fakes of the gateways, for tests. |
 | `internal/clock` | The `Clock` interface, `clock.System` and the controllable `clock.Fake`. |

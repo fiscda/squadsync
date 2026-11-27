@@ -1,5 +1,5 @@
 // Command squadsync runs the Go backend: the internal HTTP API on localhost
-// (and, in later tickets, the Discord bot and timed jobs).
+// and the Discord bot (and, in later tickets, timed jobs).
 //
 // Usage:
 //
@@ -11,6 +11,9 @@
 //	DATABASE_PATH        SQLite file shared with Next.js (required)
 //	INTERNAL_API_SECRET  shared secret Next.js sends on every call (required)
 //	BACKEND_PORT         port on 127.0.0.1 to listen on (default 8081)
+//	DISCORD_BOT_TOKEN    the bot's token; without it Go runs without the bot
+//	DISCORD_DEV_GUILD_ID register slash commands on this server only (optional)
+//	BETTER_AUTH_URL      public URL of the web app, for login links (required with the bot)
 package main
 
 import (
@@ -23,10 +26,14 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/bwmarrin/discordgo"
+
 	"squadsync-be/internal/app"
+	"squadsync-be/internal/bot"
 	"squadsync-be/internal/clock"
 	"squadsync-be/internal/gateway"
 	"squadsync-be/internal/httpapi"
@@ -39,6 +46,10 @@ type config struct {
 	dbPath string
 	secret string
 	port   string
+
+	botToken   string
+	devGuildID string
+	publicURL  string
 }
 
 func main() {
@@ -79,13 +90,38 @@ func run(log *slog.Logger, args []string) error {
 		return nil
 	}
 
+	var discord gateway.DiscordMessenger = gateway.Disabled{}
+	var session *discordgo.Session
+	if cfg.botToken != "" {
+		if session, err = bot.NewSession(cfg.botToken); err != nil {
+			return err
+		}
+		discord = bot.Messenger{Session: session}
+	}
+
 	a := app.New(app.Deps{
 		Store:    s,
 		Clock:    clock.System{},
-		Discord:  gateway.Disabled{},
+		Discord:  discord,
 		Calendar: gateway.Disabled{},
 		Spotify:  gateway.Disabled{},
 	})
+
+	if session == nil {
+		log.Info("DISCORD_BOT_TOKEN is not set: running without the Discord bot")
+	} else {
+		router := bot.NewRouter(bot.Deps{
+			App:         a,
+			LoginURL:    cfg.publicURL,
+			Log:         log,
+			ChannelName: bot.ChannelNameFromCache(session),
+		})
+		closeBot, err := bot.Start(ctx, session, router, cfg.devGuildID, log)
+		if err != nil {
+			return err
+		}
+		defer closeBot()
+	}
 
 	// Localhost only: Next.js is the sole public surface (ADR-0004).
 	addr := net.JoinHostPort("127.0.0.1", cfg.port)
@@ -121,6 +157,10 @@ func loadConfig(migrateOnly bool) (config, error) {
 		dbPath: os.Getenv("DATABASE_PATH"),
 		secret: os.Getenv("INTERNAL_API_SECRET"),
 		port:   os.Getenv("BACKEND_PORT"),
+
+		botToken:   strings.TrimSpace(os.Getenv("DISCORD_BOT_TOKEN")),
+		devGuildID: strings.TrimSpace(os.Getenv("DISCORD_DEV_GUILD_ID")),
+		publicURL:  strings.TrimRight(strings.TrimSpace(os.Getenv("BETTER_AUTH_URL")), "/"),
 	}
 	if cfg.dbPath == "" {
 		return config{}, errors.New("DATABASE_PATH is required")
@@ -130,6 +170,9 @@ func loadConfig(migrateOnly bool) (config, error) {
 	}
 	if !migrateOnly && len(cfg.secret) < minSecretLength {
 		return config{}, fmt.Errorf("INTERNAL_API_SECRET must be at least %d characters", minSecretLength)
+	}
+	if !migrateOnly && cfg.botToken != "" && cfg.publicURL == "" {
+		return config{}, errors.New("BETTER_AUTH_URL is required with DISCORD_BOT_TOKEN: the bot sends it as the login link")
 	}
 	return cfg, nil
 }
