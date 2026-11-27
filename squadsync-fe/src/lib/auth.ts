@@ -8,10 +8,23 @@ import { db } from "./db";
 export const auth = betterAuth({
   // BETTER_AUTH_SECRET and BETTER_AUTH_URL are read from the environment.
   database: db,
+  account: {
+    // Better Auth handles only web login with the main Discord account. Go
+    // owns linking further Discord accounts (ADR-0002), so Better Auth must
+    // never attach a second account to a user.
+    accountLinking: { enabled: false },
+  },
   socialProviders: {
     discord: {
       clientId: process.env.DISCORD_CLIENT_ID ?? "",
       clientSecret: process.env.DISCORD_CLIENT_SECRET ?? "",
+      // Discord returns no email for phone-only accounts, and Better Auth
+      // refuses a login without one. We never email anyone, so a unique
+      // placeholder on the reserved .invalid domain is enough.
+      mapProfileToUser: (profile) => ({
+        email: profile.email ?? `${profile.id}@discord.placeholder.invalid`,
+        emailVerified: profile.email ? profile.verified : false,
+      }),
     },
   },
   databaseHooks: {
@@ -19,18 +32,21 @@ export const auth = betterAuth({
       create: {
         // Runs once, after the first Discord login of a new user has been
         // committed. Go then creates the Felhasználó (ADR-0002).
-        after: async (account) => {
+        after: async (account, ctx) => {
           if (account.providerId !== "discord") {
             return;
           }
           try {
+            const user = await ctx?.context.internalAdapter.findUserById(
+              account.userId,
+            );
             await firstLogin(account.userId, {
               discordId: account.accountId,
-              name: userName(account.userId),
+              name: user?.name ?? "",
             });
           } catch (err) {
-            // Don't fail the login over it: the page retries the call when
-            // Go doesn't know the Felhasználó yet (see felhasznalo.ts).
+            // Don't fail the login over it: the login callback repeats the
+            // call (ensureFelhasznalo in felhasznalo.ts).
             console.error("first login: Go call failed", err);
           }
         },
@@ -39,10 +55,3 @@ export const auth = betterAuth({
   },
   plugins: [nextCookies()], // must stay last
 });
-
-// Better Auth's `user` table belongs to Next.js, so reading it here is fine
-// (only Go must never touch it). The hook runs after the user is committed.
-function userName(userId: string): string {
-  const row = db.prepare('SELECT name FROM "user" WHERE id = ?').get(userId);
-  return typeof row?.name === "string" ? row.name : "";
-}

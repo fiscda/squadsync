@@ -15,15 +15,14 @@ import (
 	"squadsync-be/internal/store"
 )
 
-// Errors returned by use cases. Entry points map them to responses.
+// Generic errors returned by use cases. Entry points map them to responses.
+// Errors specific to one area live in that area's file and wrap one of these
+// when the entry points should treat them alike.
 var (
 	// ErrNotFound means the requested thing doesn't exist.
 	ErrNotFound = errors.New("not found")
 	// ErrInvalidInput means the caller sent something malformed.
 	ErrInvalidInput = errors.New("invalid input")
-	// ErrDiscordAccountInUse means the Discord account already belongs to
-	// another Felhasznalo.
-	ErrDiscordAccountInUse = errors.New("discord account already belongs to another felhasznalo")
 )
 
 // Deps are everything the application core needs from the outside.

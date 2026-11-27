@@ -51,6 +51,8 @@ async function callBackend<T>(
     },
     body: body === undefined ? undefined : JSON.stringify(body),
     cache: "no-store",
+    // Go is on localhost; if it hangs, fail fast instead of hanging the page.
+    signal: AbortSignal.timeout(5000),
   });
 
   if (!res.ok) {

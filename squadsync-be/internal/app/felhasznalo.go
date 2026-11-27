@@ -10,6 +10,17 @@ import (
 	"squadsync-be/internal/store"
 )
 
+// Errors of the Felhasznalo area.
+var (
+	// ErrDiscordAccountInUse means the Discord account already belongs to
+	// another Felhasznalo.
+	ErrDiscordAccountInUse = errors.New("discord account already belongs to another felhasznalo")
+	// ErrDiscordAccountNotOwn means an existing Felhasznalo logged in with a
+	// Discord account that isn't one of theirs. Better Auth must never attach
+	// a second Discord account to a user; Go owns linking (ADR-0002).
+	ErrDiscordAccountNotOwn = errors.New("discord account is not one of the felhasznalo's accounts")
+)
+
 // FirstLoginInput is what Next.js knows right after a Felhasznalo's first web
 // login through Better Auth.
 type FirstLoginInput struct {
@@ -27,7 +38,9 @@ type FirstLoginInput struct {
 // (ADR-0002).
 //
 // It is idempotent: if the Felhasznalo already exists, it is returned
-// unchanged, so calling it again on a later login reuses it.
+// unchanged, so calling it again on a later login reuses it. The Discord
+// account must then be one of theirs, or it fails with
+// ErrDiscordAccountNotOwn.
 func (a *App) FirstLogin(ctx context.Context, in FirstLoginInput) (domain.Felhasznalo, error) {
 	in.FelhasznaloID = strings.TrimSpace(in.FelhasznaloID)
 	in.DiscordID = strings.TrimSpace(in.DiscordID)
@@ -41,8 +54,17 @@ func (a *App) FirstLogin(ctx context.Context, in FirstLoginInput) (domain.Felhas
 
 	var result domain.Felhasznalo
 	err := a.store.InTx(ctx, func(q store.Queries) error {
+		account, err := q.FindDiscordAccount(ctx, in.DiscordID)
+		accountKnown := err == nil
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+
 		existing, err := q.FindFelhasznalo(ctx, in.FelhasznaloID)
 		if err == nil {
+			if !accountKnown || account.FelhasznaloID != existing.ID {
+				return ErrDiscordAccountNotOwn
+			}
 			result = existing
 			return nil
 		}
@@ -50,12 +72,8 @@ func (a *App) FirstLogin(ctx context.Context, in FirstLoginInput) (domain.Felhas
 			return err
 		}
 
-		account, err := q.FindDiscordAccount(ctx, in.DiscordID)
-		if err == nil && account.FelhasznaloID != in.FelhasznaloID {
+		if accountKnown {
 			return ErrDiscordAccountInUse
-		}
-		if err != nil && !errors.Is(err, store.ErrNotFound) {
-			return err
 		}
 
 		now := a.clock.Now()

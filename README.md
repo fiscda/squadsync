@@ -25,7 +25,7 @@ Every developer uses their own test application.
 4. Under **Redirects**, add `http://localhost:3000/api/auth/callback/discord` and save.
    - In production, add `https://<your domain>/api/auth/callback/discord` too.
 
-Login asks only for the `identify` and `email` scopes, and no bot is needed yet.
+Login asks only for the `identify` and `email` scopes, and no bot is needed yet. Discord accounts registered with only a phone number have no email, so they get a placeholder address on the reserved `.invalid` domain. The app never sends email.
 
 ### 2. Configure the environment
 
@@ -65,7 +65,11 @@ make migrate-be    # Go: embedded SQL files in squadsync-be/internal/store/migra
 make migrate-fe    # Better Auth CLI: bun run auth:migrate (in squadsync-fe/)
 ```
 
-- **Go:** the server also migrates on every start. Add a new file `NNNN_description.sql` to the migrations folder, and never edit one that has already been applied. Applied versions are recorded in `schema_migrations`.
+- **Go:** the server also migrates on every start. Applied versions are recorded in `schema_migrations`. To add a migration:
+  - Name the file `YYYYMMDDHHMM_description.sql`, using the current UTC time (`date -u +%Y%m%d%H%M`). Timestamps keep parallel branches from picking the same number.
+  - Two files with the same version make the migration fail.
+  - Never edit or rename a file once it has been applied anywhere. A version recorded under a different file name makes the migration fail.
+  - Each file runs in one transaction with foreign keys enforced. SQLite can't turn them off inside a transaction, so a migration that rebuilds a table (create new, copy, drop old, rename) must start with `PRAGMA defer_foreign_keys = ON;`. The checks then run at commit.
 - **Better Auth:** the CLI reads `squadsync-fe/src/lib/auth.ts` and adds missing tables and columns.
 
 ## Checks
@@ -84,24 +88,22 @@ make lint   # cd squadsync-fe && bun run lint && bunx tsc --noEmit
    - `X-Internal-Secret`: the shared secret. Go answers `401` without it.
    - `X-Felhasznalo-Id`: Better Auth's `user.id`, which is also the Felhasználó id.
 3. **First login.** When Better Auth creates the Discord account of a new user, a database hook (`squadsync-fe/src/lib/auth.ts`) calls `POST /felhasznalo/first-login` with the Discord user id. Go creates the Felhasználó and records the main Discord account. The call is idempotent.
-   - If Go was down at that moment, the page repeats the call the next time it can't find the Felhasználó (`squadsync-fe/src/lib/felhasznalo.ts`).
+   - If that call failed (for example, Go was down), it's repeated by `ensureFelhasznalo` (`squadsync-fe/src/lib/felhasznalo.ts`). This runs in the `/login/complete` route handler, where Better Auth redirects after every login. If the Felhasználó is still missing, the page offers a retry button, which calls a server action.
+   - Rendering never mutates. Pages only read, through `getCurrentFelhasznalo`.
+4. **Linking.** Better Auth's own account linking is turned off. Linking more Discord accounts belongs to Go (ADR-0002).
 
 ## Go backend layout
 
 | Package | Contents |
 | --- | --- |
 | `cmd/squadsync` | `main`. It reads the environment, migrates and serves. `squadsync migrate` only migrates. |
-| `internal/app` | **The application core.** Every use case is a method on `app.App`, which is the test seam. |
+| `internal/app` | **The application core.** Every use case is a method on `app.App`, which is the test seam. Generic errors live in `app.go`; area-specific errors live in that area's file. |
 | `internal/domain` | Plain domain types (`Felhasznalo`, `DiscordAccount`). |
-| `internal/store` | SQLite: open (WAL, busy timeout, `BEGIN IMMEDIATE`), embedded migrations and queries. Use `Store.InTx` for transactions. |
-| `internal/httpapi` | The thin internal HTTP API. It checks the secret, translates requests and calls one use case. |
+| `internal/store` | SQLite: open (WAL, busy timeout, `BEGIN IMMEDIATE`), embedded migrations (`migrations/`) and queries. Use `Store.InTx` for transactions. |
+| `internal/httpapi` | The thin internal HTTP API. A global middleware checks the secret, and `withFelhasznalo` requires the Felhasználó id on routes that act for one. Each area registers its routes in its own file with `register<Area>(mux)`. |
 | `internal/gateway` | Outbound interfaces: Discord messaging, Google Calendar and Spotify. |
 | `internal/gateway/gatewayfake` | Recording fakes of the gateways, for tests. |
 | `internal/clock` | The `Clock` interface, `clock.System` and the controllable `clock.Fake`. |
 | `internal/apptest` | The test harness. `apptest.New(t)` gives an `App` on a temporary SQLite file with the real migrations, a fake clock and the recording fakes. |
 
 Core tests live next to the use cases (for example `internal/app/felhasznalo_test.go`), in package `app_test`, and use `apptest.New(t)`.
-
-## Known limitations
-
-- Discord returns no email for phone-only Discord accounts, and Better Auth then refuses the login (`email_not_found`).

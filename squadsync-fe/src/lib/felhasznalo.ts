@@ -1,26 +1,47 @@
 import "server-only";
 import { headers } from "next/headers";
+import { cache } from "react";
 import { auth } from "./auth";
 import { type Felhasznalo, firstLogin, getFelhasznalo } from "./backend";
 
+export type CurrentFelhasznalo =
+  /** Nobody is logged in. */
+  | { status: "anonymous" }
+  /** Logged in, but Go doesn't know the Felhasználó yet. */
+  | { status: "missing" }
+  | { status: "ok"; felhasznalo: Felhasznalo };
+
 /**
- * Returns the logged-in Felhasználó as Go knows them, or null when nobody is
- * logged in.
- *
- * Go normally learns about a Felhasználó from the Better Auth hook on their
- * first login. If that call failed (say, Go was down), this repeats it: the
- * first-login call is idempotent.
+ * Reads the logged-in Felhasználó as Go knows them. Read-only, so it's safe
+ * to call while rendering, and cached for the duration of one request.
  */
-export async function getCurrentFelhasznalo(): Promise<Felhasznalo | null> {
+export const getCurrentFelhasznalo = cache(
+  async (): Promise<CurrentFelhasznalo> => {
+    const session = await auth.api.getSession({ headers: await headers() });
+    if (!session) {
+      return { status: "anonymous" };
+    }
+    const felhasznalo = await getFelhasznalo(session.user.id);
+    return felhasznalo ? { status: "ok", felhasznalo } : { status: "missing" };
+  },
+);
+
+/**
+ * Makes sure Go knows the logged-in Felhasználó, repeating the idempotent
+ * first-login call if needed. Go normally learns about them from the Better
+ * Auth hook; this covers a hook call that failed (for example, Go was down).
+ *
+ * It's a mutation, so call it only from a route handler or a server action,
+ * never while rendering. Returns false when nobody is logged in.
+ */
+export async function ensureFelhasznalo(): Promise<boolean> {
   const requestHeaders = await headers();
   const session = await auth.api.getSession({ headers: requestHeaders });
   if (!session) {
-    return null;
+    return false;
   }
-
-  const felhasznalo = await getFelhasznalo(session.user.id);
-  if (felhasznalo) {
-    return felhasznalo;
+  if (await getFelhasznalo(session.user.id)) {
+    return true;
   }
 
   const accounts = await auth.api.listUserAccounts({
@@ -30,8 +51,9 @@ export async function getCurrentFelhasznalo(): Promise<Felhasznalo | null> {
   if (!discord) {
     throw new Error(`user ${session.user.id} has no Discord account`);
   }
-  return firstLogin(session.user.id, {
+  await firstLogin(session.user.id, {
     discordId: discord.accountId,
     name: session.user.name,
   });
+  return true;
 }

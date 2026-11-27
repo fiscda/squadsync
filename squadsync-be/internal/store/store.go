@@ -90,6 +90,8 @@ type Queries struct {
 	db dbtx
 }
 
+func isNoRows(err error) bool { return errors.Is(err, sql.ErrNoRows) }
+
 func formatTime(t time.Time) string { return t.UTC().Format(timeFormat) }
 
 func parseTime(s string) (time.Time, error) {

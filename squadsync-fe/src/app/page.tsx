@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { getCurrentFelhasznalo } from "@/lib/felhasznalo";
-import { signInWithDiscord, signOut } from "./actions";
+import { retryFirstLogin, signInWithDiscord, signOut } from "./actions";
 
 const buttonClass =
   "rounded-full bg-foreground px-5 py-3 font-medium text-background transition-opacity hover:opacity-80";
@@ -10,18 +10,18 @@ export default function Home() {
     <main className="mx-auto flex w-full max-w-xl flex-1 flex-col items-center justify-center gap-8 px-4 py-16 text-center">
       <h1 className="text-4xl font-semibold tracking-tight">Squad Sync</h1>
       <Suspense fallback={<p className="text-zinc-500">Betöltés…</p>}>
-        <Udvozles />
+        <Greeting />
       </Suspense>
     </main>
   );
 }
 
 // Reads the session, so it streams in behind the Suspense boundary.
-async function Udvozles() {
+async function Greeting() {
   // Errors (e.g. Go is down) are shown by error.tsx.
-  const felhasznalo = await getCurrentFelhasznalo();
+  const current = await getCurrentFelhasznalo();
 
-  if (!felhasznalo) {
+  if (current.status === "anonymous") {
     return (
       <div className="flex flex-col items-center gap-4">
         <p className="text-lg text-zinc-600 dark:text-zinc-400">
@@ -36,6 +36,22 @@ async function Udvozles() {
     );
   }
 
+  if (current.status === "missing") {
+    return (
+      <div className="flex flex-col items-center gap-4">
+        <p className="text-lg">
+          Beléptél, de a profilodat még nem sikerült létrehozni.
+        </p>
+        <form action={retryFirstLogin}>
+          <button type="submit" className={buttonClass}>
+            Újrapróbálom
+          </button>
+        </form>
+      </div>
+    );
+  }
+
+  const { felhasznalo } = current;
   const since = new Intl.DateTimeFormat("hu-HU", {
     dateStyle: "long",
     timeZone: "Europe/Budapest",
