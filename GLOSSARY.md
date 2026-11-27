@@ -112,6 +112,10 @@ _Avoid_: Not staying, own accommodation
 Felszerelés is the Kiegészítő for things to bring. A Tétel is one thing on the list, with a needed quantity that Résztvevők claim, partially if they like. A Tétel marked "mindenki hozza" is a reminder for everyone rather than something to claim.
 _Avoid_: Inventory, gear, item, packing list
 
+**Vállalás**:
+A Résztvevő's claim of part of a Tétel's quantity ("Anna: 2 of 3"), or a Tag's for their name-only Vendég. It is released when they drop out.
+_Avoid_: Claim (for a Tétel), pledge, reservation
+
 **Kaja** / **Étkezés** / **Javaslat** / **Szavazás**:
 Kaja is the Kiegészítő for deciding what to eat. An Étkezés is one meal, a Javaslat is a dish suggested for it, and the Szavazás is the approval vote on its Javaslatok, from which the Szervező picks the winner.
 _Avoid_: Food poll, meal vote, suggestion, Egyeztetés (that word is the Esemény state)

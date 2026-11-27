@@ -41,6 +41,8 @@ func New(a *app.App, secret string, log *slog.Logger) http.Handler {
 	s.registerFelhasznalo(mux)
 	s.registerCsoport(mux)
 	s.registerEsemeny(mux)
+	s.registerKiegeszito(mux)
+	s.registerFelszereles(mux)
 
 	return requireSecret(secret, mux)
 }

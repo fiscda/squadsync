@@ -58,7 +58,7 @@ type Announcement struct {
 
 // DropOut tells the Szervezo that someone dropped from igen on the
 // confirmed Idopont. Its fields are plain text; the bot words and escapes
-// them. #16 adds what the drop-out freed (seats, beds, Tetelek).
+// them.
 type DropOut struct {
 	// Name is who dropped out.
 	Name        string
@@ -66,6 +66,9 @@ type DropOut struct {
 	Title       string
 	// Link is the Esemeny's web page.
 	Link string
+	// Felszabadult is what the drop-out's released claims freed, e.g.
+	// "2 db sátor, 1 db gázpalack"; "" for nothing.
+	Felszabadult string
 }
 
 // VoteRequest asks a Tag to answer a new Esemeny. Its fields are plain
@@ -114,6 +117,9 @@ type EsemenyMessage struct {
 	// Resztvevok are the names of the Resztvevok, set only while the
 	// Esemeny has a confirmed Idopont.
 	Resztvevok []string
+	// KiegeszitoSummary is the Kiegeszitok' summary line, e.g.
+	// "🎒 2 hiányzik", "" when none is on.
+	KiegeszitoSummary string
 }
 
 // MaxAnswerRows is how many Idopontok can have answer buttons: Discord

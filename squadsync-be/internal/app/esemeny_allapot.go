@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"squadsync-be/internal/domain"
 	"squadsync-be/internal/gateway"
@@ -36,6 +37,7 @@ const (
 // reopen Egyeztetes first).
 func (a *App) ConfirmIdopont(ctx context.Context, felhasznaloID, esemenyID, idopontID string) error {
 	var ann gateway.Announcement
+	var released []func(context.Context)
 	err := a.store.InTx(ctx, func(q store.Queries) error {
 		e, err := requireSzervezo(ctx, q, esemenyID, felhasznaloID)
 		if err != nil {
@@ -51,9 +53,14 @@ func (a *App) ConfirmIdopont(ctx context.Context, felhasznaloID, esemenyID, idop
 		if e.Allapot != domain.Egyeztetes {
 			return ErrInvalidTransition
 		}
-		// #16 drops the claims of people who aren't Resztvevok of the
-		// newly confirmed Idopont here, in this transaction.
 		if err := q.UpdateEsemenyAllapot(ctx, e.ID, domain.Veglegesitve, i.ID); err != nil {
+			return err
+		}
+		// Claims of people who aren't Resztvevok of the newly confirmed
+		// Idopont are dropped, in this transaction (Kiegeszito framework).
+		confirmed := e
+		confirmed.Allapot, confirmed.ConfirmedIdopontID = domain.Veglegesitve, i.ID
+		if released, err = a.releaseNonResztvevok(ctx, q, confirmed); err != nil {
 			return err
 		}
 		ann, err = a.announcement(ctx, q, e, veglegesitveHeadline, idopontLabel(i, a.clock.Now()))
@@ -62,7 +69,12 @@ func (a *App) ConfirmIdopont(ctx context.Context, felhasznaloID, esemenyID, idop
 	if err != nil {
 		return err
 	}
-	a.afterCommit(func(ctx context.Context) { a.announceAllapot(ctx, esemenyID, felhasznaloID, ann) })
+	a.afterCommit(func(ctx context.Context) {
+		for _, job := range released {
+			job(ctx)
+		}
+		a.announceAllapot(ctx, esemenyID, felhasznaloID, ann)
+	})
 	return nil
 }
 
@@ -80,7 +92,8 @@ func (a *App) ReopenEgyeztetes(ctx context.Context, felhasznaloID, esemenyID str
 		if e.Allapot != domain.Veglegesitve {
 			return ErrInvalidTransition
 		}
-		// #16 freezes claims while the Esemeny is back in Egyeztetes.
+		// Claims are kept but frozen while the Esemeny is back in
+		// Egyeztetes: requireClaimAllowed needs Veglegesitve.
 		if err := q.UpdateEsemenyAllapot(ctx, e.ID, domain.Egyeztetes, ""); err != nil {
 			return err
 		}
@@ -203,9 +216,9 @@ func (a *App) channelPost(ctx context.Context, esemenyID, channelID string) (gat
 }
 
 // dropOut builds the Szervezo's DM about a Resztvevo who dropped from igen.
-// It runs in the transaction of the change; #16 passes what the drop-out
-// freed (seats, beds, Tetelek) and adds it here.
-func (a *App) dropOut(ctx context.Context, q store.Queries, e domain.Esemeny, felhasznaloID string) (gateway.DropOut, error) {
+// It runs in the transaction of the change; freed is what the drop-out's
+// released claims freed in the Kiegeszitok ("2 db sátor").
+func (a *App) dropOut(ctx context.Context, q store.Queries, e domain.Esemeny, felhasznaloID string, freed []string) (gateway.DropOut, error) {
 	f, err := q.FindFelhasznalo(ctx, felhasznaloID)
 	if err != nil {
 		return gateway.DropOut{}, err
@@ -214,5 +227,8 @@ func (a *App) dropOut(ctx context.Context, q store.Queries, e domain.Esemeny, fe
 	if err != nil {
 		return gateway.DropOut{}, err
 	}
-	return gateway.DropOut{Name: f.Name, CsoportName: csoport.Name, Title: e.Title, Link: a.esemenyURL(e.ID)}, nil
+	return gateway.DropOut{
+		Name: f.Name, CsoportName: csoport.Name, Title: e.Title, Link: a.esemenyURL(e.ID),
+		Felszabadult: strings.Join(freed, ", "),
+	}, nil
 }

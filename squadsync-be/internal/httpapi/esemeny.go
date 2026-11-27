@@ -89,6 +89,8 @@ type esemenyDetailJSON struct {
 	ConfirmedIdopontID *string `json:"confirmedIdopontId"`
 	// Resztvevok are empty unless the Esemeny is Veglegesitve or Lezajlott.
 	Resztvevok []resztvevoJSON `json:"resztvevok"`
+	// Kiegeszitok are every Kiegeszito that exists, in display order.
+	Kiegeszitok []kiegeszitoJSON `json:"kiegeszitok"`
 }
 
 func toEsemenyJSON(e domain.Esemeny) esemenyJSON {
@@ -204,6 +206,7 @@ func (s *server) getEsemeny(w http.ResponseWriter, r *http.Request, felhasznaloI
 		Idopontok:          idopontok,
 		Resztvevok:         resztvevok,
 		ConfirmedIdopontID: nullable(d.ConfirmedIdopont),
+		Kiegeszitok:        toKiegeszitokJSON(d.Kiegeszitok),
 	})
 }
 

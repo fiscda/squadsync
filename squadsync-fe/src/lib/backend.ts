@@ -45,9 +45,10 @@ function errorCode(body: string): string {
 
 /**
  * Calls Go. Pass the Felhasználó's id for routes that act for them, or null
- * for the few routes that run before a Felhasználó exists.
+ * for the few routes that run before a Felhasználó exists. Exported for the
+ * per-Kiegészítő clients in lib/kiegeszito/.
  */
-async function callBackend<T>(
+export async function callBackend<T>(
   felhasznaloId: string | null,
   method: "GET" | "POST" | "PUT" | "DELETE",
   path: string,
@@ -505,7 +506,7 @@ function meghivoRefusal(err: unknown): {
   throw err;
 }
 
-async function nullOnNotFound<T>(call: Promise<T>): Promise<T | null> {
+export async function nullOnNotFound<T>(call: Promise<T>): Promise<T | null> {
   try {
     return await call;
   } catch (err) {
@@ -606,6 +607,8 @@ export type EsemenyDetail = Esemeny & {
   confirmedIdopontId: string | null;
   /** Ordered by name; empty unless Véglegesítve or Lezajlott. */
   resztvevok: Resztvevo[];
+  /** Every Kiegészítő that exists (is built), in display order. */
+  kiegeszitok: Kiegeszito[];
 };
 
 export type EsemenyInput = {
@@ -719,5 +722,44 @@ export async function cancelEsemeny(
     felhasznaloId,
     "POST",
     `/esemeny/${encodeURIComponent(esemenyId)}/lemondas`,
+  );
+}
+
+// --- Kiegészítők (the framework; each Kiegészítő's own calls live in
+// lib/kiegeszito/<kind>.ts) ---
+
+export type KiegeszitoKind =
+  | "koltsegek"
+  | "autok"
+  | "szallas"
+  | "felszereles"
+  | "kaja"
+  | "lejatszasi_lista";
+
+/** One Kiegészítő of an Esemény. */
+export type Kiegeszito = {
+  kind: KiegeszitoKind;
+  enabled: boolean;
+  /** Whether the Szervező can switch it in the Esemény's state. */
+  switchable: boolean;
+};
+
+/**
+ * The Szervező switches a Kiegészítő on or off. Switching off only hides its
+ * data. Go answers 403 for anyone else, 409 with code "kiegeszito_locked"
+ * once the Esemény is Elmaradt or Lezajlott, and 409 with
+ * "kiegeszito_in_use" when the Kiegészítő refuses to be switched off.
+ */
+export async function setKiegeszito(
+  felhasznaloId: string,
+  esemenyId: string,
+  kind: KiegeszitoKind,
+  enabled: boolean,
+): Promise<void> {
+  await callBackend<void>(
+    felhasznaloId,
+    "PUT",
+    `/esemeny/${encodeURIComponent(esemenyId)}/kiegeszito/${encodeURIComponent(kind)}`,
+    { enabled },
   );
 }

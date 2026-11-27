@@ -95,6 +95,9 @@ func (a *App) esemenyMessage(ctx context.Context, q store.Queries, e domain.Esem
 		notes = append(notes, fmt.Sprintf(webPageNote, pageURL))
 	}
 	m.Note = strings.Join(notes, "\n")
+	if m.KiegeszitoSummary, err = a.kiegeszitoSummary(ctx, q, e); err != nil {
+		return gateway.EsemenyMessage{}, err
+	}
 	return m, nil
 }
 
