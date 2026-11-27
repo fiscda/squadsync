@@ -12,6 +12,23 @@ const dateTimeFormat = new Intl.DateTimeFormat("hu-HU", {
   timeZone: "Europe/Budapest",
 });
 
+const dateFormat = new Intl.DateTimeFormat("hu-HU", {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  weekday: "short",
+  timeZone: "Europe/Budapest",
+});
+
+/**
+ * A whole-day Időpont as its days, e.g. "2026. dec. 5., szo. – dec. 7., h.".
+ * Its end is midnight after the last day, so step back to that day.
+ */
+export function formatEgeszNapos(start: string, end: string): string {
+  const lastDay = new Date(new Date(end).getTime() - 1);
+  return dateFormat.formatRange(new Date(start), lastDay);
+}
+
 /**
  * An Időpont as Budapest local time, e.g. "2026. december 5., szombat
  * 20:00–23:00", or a range across days for a multi-day one.

@@ -50,6 +50,10 @@ type Idopont struct {
 	// End is nil when the Idopont has only a start. Otherwise it is after
 	// Start, possibly several days later.
 	End *time.Time
+	// EgeszNapos marks a whole-day Idopont. It runs from Budapest midnight
+	// of its first day (Start) to Budapest midnight after its last day (End,
+	// always set), and is shown as dates only.
+	EgeszNapos bool
 	// AddedBy is the Felhasznalo who added the Idopont.
 	AddedBy   string
 	CreatedAt time.Time
@@ -81,7 +85,9 @@ type Visszajelzes struct {
 
 // VisszajelzesOfEsemeny is a Visszajelzes as an Esemeny's page shows it:
 // with the name of whoever gave it and whether they are a Tag of the
-// Esemeny's Csoport (only Tags count toward the Helyezes).
+// Esemeny's Csoport (only Tags count toward the Helyezes). A row not given
+// by a Felhasznalo (a name-only Vendeg's, #13) has an empty FelhasznaloID
+// and name until #13 fills them in.
 type VisszajelzesOfEsemeny struct {
 	Visszajelzes
 	FelhasznaloName string

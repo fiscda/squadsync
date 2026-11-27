@@ -45,6 +45,7 @@ export async function proposeEsemenyAction(
     };
   }
 
+  const egeszNaposFlags = all("egeszNapos");
   const startDates = all("startDate");
   const startTimes = all("startTime");
   const endDates = all("endDate");
@@ -55,6 +56,23 @@ export async function proposeEsemenyAction(
     const startTime = startTimes[i] ?? "";
     let endDate = endDates[i] ?? "";
     const endTime = endTimes[i] ?? "";
+    if (egeszNaposFlags[i] === "1") {
+      // Whole days: only the first and (optionally) the last day count.
+      if (startDate === "") {
+        return { error: `A(z) ${n}. időpontnál add meg az első napot.` };
+      }
+      if (endDate !== "" && endDate < startDate) {
+        return {
+          error: `A(z) ${n}. időpont utolsó napja nem lehet az első előtt.`,
+        };
+      }
+      input.idopontok.push({
+        start: startDate,
+        end: endDate,
+        egeszNapos: true,
+      });
+      continue;
+    }
     if (startDate === "" || startTime === "") {
       return {
         error: `A(z) ${n}. időpontnál add meg a kezdés napját és idejét.`,
@@ -74,7 +92,7 @@ export async function proposeEsemenyAction(
         error: `A(z) ${n}. időpont befejezése a kezdése után legyen.`,
       };
     }
-    input.idopontok.push({ start, end });
+    input.idopontok.push({ start, end, egeszNapos: false });
   }
   if (input.idopontok.length === 0) {
     return { error: "Adj meg legalább egy időpontot." };
@@ -89,6 +107,12 @@ export async function proposeEsemenyAction(
       if (err.status === 404) {
         redirect("/csoportok");
       }
+      if (err.status === 422) {
+        return {
+          error:
+            "Az egyik időpont nem létezik az óraátállítás miatt (pl. március végén 02:00 és 03:00 között). Válassz másik időt.",
+        };
+      }
       if (err.status === 400) {
         return {
           error:
@@ -99,6 +123,11 @@ export async function proposeEsemenyAction(
     throw err;
   }
   redirect(`/esemenyek/${esemenyId}`);
+}
+
+// Server actions are public endpoints: the bound valasz can't be trusted.
+function isValasz(value: unknown): value is Valasz {
+  return value === "igen" || value === "talan" || value === "nem";
 }
 
 function isHttpUrl(value: string): boolean {
@@ -117,6 +146,9 @@ export async function setVisszajelzesAction(
   idopontId: string,
   valasz: Valasz,
 ) {
+  if (!isValasz(valasz)) {
+    throw new Error(`unknown valasz ${String(valasz)}`);
+  }
   const felhasznalo = await requireFelhasznalo();
   try {
     await setVisszajelzes(felhasznalo.id, esemenyId, idopontId, valasz);
@@ -128,7 +160,8 @@ export async function setVisszajelzesAction(
         redirect("/csoportok");
       }
       if (err.status === 409) {
-        // No longer in Egyeztetés: the refreshed page shows why.
+        // The Időpont can't be answered in the Esemény's current state
+        // (ErrIdopontNotAnswerable): the refreshed page shows why.
         revalidatePath(`/esemenyek/${esemenyId}`);
         return;
       }

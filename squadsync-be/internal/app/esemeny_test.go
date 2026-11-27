@@ -404,3 +404,94 @@ func TestHelyezesekIsAGenericRanking(t *testing.T) {
 		t.Fatalf("empty input should give an empty ranking")
 	}
 }
+
+func TestAnIdopontAnsweredOnlyByAFormerTagHasNoPlace(t *testing.T) {
+	h := apptest.New(t)
+	c := csoportOf(t, h, "volt")
+	e := propose(t, h, "anna", c.ID, 2)
+	d := detail(t, h, "anna", e.ID)
+
+	answer(t, h, "anna", d, 0, domain.Talan)
+	answer(t, h, "volt", d, 1, domain.Igen)
+	if err := h.Store.DeleteTag(context.Background(), c.ID, "volt"); err != nil {
+		t.Fatalf("remove tag: %v", err)
+	}
+
+	d = detail(t, h, "anna", e.ID)
+	expectHelyezesek(t, d, 1, 0)
+	a := d.Idopontok[1]
+	if a.Igen != 0 || a.Talan != 0 || a.Nem != 0 {
+		t.Fatalf("counts = %d/%d/%d, want none", a.Igen, a.Talan, a.Nem)
+	}
+	if len(a.Visszajelzesek) != 1 || a.Visszajelzesek[0].FelhasznaloID != "volt" ||
+		a.Visszajelzesek[0].IsTag || a.Visszajelzesek[0].Valasz != domain.Igen {
+		t.Fatalf("visszajelzesek = %+v, want volt's igen listed as a non-Tag", a.Visszajelzesek)
+	}
+}
+
+func TestWholeDayIdopontRunsFromBudapestMidnightToMidnightAfterTheLastDay(t *testing.T) {
+	h := apptest.New(t)
+	ctx := context.Background()
+	c := csoportOf(t, h)
+	e, err := h.App.ProposeEsemeny(ctx, "anna", c.ID, app.EsemenyInput{
+		Title: "Kirándulás",
+		Idopontok: []app.IdopontInput{
+			// One winter day.
+			{Start: "2026-12-05", EgeszNapos: true},
+			// Three days across the spring DST change (29 March).
+			{Start: "2026-03-28", End: "2026-03-30", EgeszNapos: true},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ProposeEsemeny: %v", err)
+	}
+	d := detail(t, h, "anna", e.ID)
+	want := []struct{ start, end time.Time }{
+		{time.Date(2026, 3, 27, 23, 0, 0, 0, time.UTC), time.Date(2026, 3, 30, 22, 0, 0, 0, time.UTC)},
+		{time.Date(2026, 12, 4, 23, 0, 0, 0, time.UTC), time.Date(2026, 12, 5, 23, 0, 0, 0, time.UTC)},
+	}
+	for n, w := range want {
+		i := d.Idopontok[n]
+		if !i.EgeszNapos || !i.Start.Equal(w.start) || i.End == nil || !i.End.Equal(w.end) {
+			t.Errorf("idopont %d = %v – %v (egesz napos %v), want %v – %v", n, i.Start, i.End, i.EgeszNapos, w.start, w.end)
+		}
+	}
+
+	for name, in := range map[string]app.IdopontInput{
+		"last day before first": {Start: "2026-12-07", End: "2026-12-05", EgeszNapos: true},
+		"a time, not a day":     {Start: "2026-12-05T20:00", EgeszNapos: true},
+	} {
+		_, err := h.App.ProposeEsemeny(ctx, "anna", c.ID, app.EsemenyInput{Title: "X", Idopontok: []app.IdopontInput{in}})
+		if !errors.Is(err, app.ErrInvalidInput) {
+			t.Errorf("%s: err = %v, want ErrInvalidInput", name, err)
+		}
+	}
+}
+
+func TestLocalTimesAroundDaylightSavingChanges(t *testing.T) {
+	h := apptest.New(t)
+	ctx := context.Background()
+	c := csoportOf(t, h)
+
+	// Clocks jump from 02:00 to 03:00 on 29 March 2026: 02:30 never happens.
+	for _, in := range []app.IdopontInput{
+		{Start: "2026-03-29T02:30"},
+		{Start: "2026-03-28T20:00", End: "2026-03-29T02:15"},
+	} {
+		_, err := h.App.ProposeEsemeny(ctx, "anna", c.ID, app.EsemenyInput{Title: "X", Idopontok: []app.IdopontInput{in}})
+		if !errors.Is(err, app.ErrNonexistentLocalTime) || !errors.Is(err, app.ErrInvalidInput) {
+			t.Errorf("%+v: err = %v, want ErrNonexistentLocalTime", in, err)
+		}
+	}
+
+	// Clocks fall back from 03:00 to 02:00 on 25 October 2026: 02:30 happens
+	// twice and means the first, still in summer time (UTC+2).
+	e, err := h.App.ProposeEsemeny(ctx, "anna", c.ID, app.EsemenyInput{Title: "X", Idopontok: []app.IdopontInput{{Start: "2026-10-25T02:30"}}})
+	if err != nil {
+		t.Fatalf("ProposeEsemeny in the autumn overlap: %v", err)
+	}
+	got := detail(t, h, "anna", e.ID).Idopontok[0].Start
+	if want := time.Date(2026, 10, 25, 0, 30, 0, 0, time.UTC); !got.Equal(want) {
+		t.Fatalf("start = %v, want the first occurrence %v", got, want)
+	}
+}

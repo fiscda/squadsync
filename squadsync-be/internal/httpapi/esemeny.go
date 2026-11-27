@@ -50,13 +50,15 @@ type visszajelzesJSON struct {
 }
 
 type idopontJSON struct {
-	ID      string     `json:"id"`
-	Start   time.Time  `json:"start"`
-	End     *time.Time `json:"end"`
-	AddedBy string     `json:"addedBy"`
-	Igen    int        `json:"igen"`
-	Talan   int        `json:"talan"`
-	Nem     int        `json:"nem"`
+	ID    string     `json:"id"`
+	Start time.Time  `json:"start"`
+	End   *time.Time `json:"end"`
+	// EgeszNapos: Start and End are Budapest midnights; show dates only.
+	EgeszNapos bool   `json:"egeszNapos"`
+	AddedBy    string `json:"addedBy"`
+	Igen       int    `json:"igen"`
+	Talan      int    `json:"talan"`
+	Nem        int    `json:"nem"`
 	// Helyezes is null when no Tag has answered.
 	Helyezes *int `json:"helyezes"`
 	// Sajat is the caller's own answer, null if none.
@@ -89,6 +91,7 @@ func toIdopontJSON(a app.IdopontAllas) idopontJSON {
 		ID:             a.ID,
 		Start:          a.Start,
 		End:            a.End,
+		EgeszNapos:     a.EgeszNapos,
 		AddedBy:        a.AddedBy,
 		Igen:           a.Igen,
 		Talan:          a.Talan,
@@ -120,10 +123,12 @@ func (s *server) proposeEsemeny(w http.ResponseWriter, r *http.Request, felhaszn
 		Title       string       `json:"title"`
 		Description string       `json:"description"`
 		Helyszin    helyszinJSON `json:"helyszin"`
-		// Idopontok are Budapest wall clock times, like "2026-12-05T20:00".
+		// Idopontok are Budapest wall clock times, like "2026-12-05T20:00",
+		// or with egeszNapos the first and last day, like "2026-12-05".
 		Idopontok []struct {
-			Start string `json:"start"`
-			End   string `json:"end"`
+			Start      string `json:"start"`
+			End        string `json:"end"`
+			EgeszNapos bool   `json:"egeszNapos"`
 		} `json:"idopontok"`
 	}
 	if !decodeJSON(w, r, &body) {
@@ -135,7 +140,7 @@ func (s *server) proposeEsemeny(w http.ResponseWriter, r *http.Request, felhaszn
 		Helyszin:    domain.Helyszin{Name: body.Helyszin.Name, URL: body.Helyszin.URL},
 	}
 	for _, i := range body.Idopontok {
-		in.Idopontok = append(in.Idopontok, app.IdopontInput{Start: i.Start, End: i.End})
+		in.Idopontok = append(in.Idopontok, app.IdopontInput{Start: i.Start, End: i.End, EgeszNapos: i.EgeszNapos})
 	}
 	e, err := s.app.ProposeEsemeny(r.Context(), felhasznaloID, r.PathValue("id"), in)
 	if err != nil {
@@ -192,8 +197,14 @@ func (s *server) setVisszajelzes(w http.ResponseWriter, r *http.Request, felhasz
 }
 
 func (s *server) writeEsemenyError(w http.ResponseWriter, r *http.Request, err error) {
-	if errors.Is(err, app.ErrNotInEgyeztetes) {
+	if errors.Is(err, app.ErrIdopontNotAnswerable) {
 		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	// Checked before the generic ErrInvalidInput it wraps, so the web can
+	// explain it.
+	if errors.Is(err, app.ErrNonexistentLocalTime) {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	s.writeAppError(w, r, err)

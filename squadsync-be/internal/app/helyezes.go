@@ -10,7 +10,11 @@ type Helyezes int
 // by element: the first element decides, the next breaks ties, and so on. A
 // nil Pontszam means nobody has answered the entry, so it gets no Helyezes.
 //
-// An Idopont scores {igen, talan, -nem}; a Javaslat would score {backers}.
+// All non-nil Pontszams passed to one Helyezesek call must have the same
+// length. An entry nobody has answered must be passed as nil, not as zeros:
+// an Idopont with no Visszajelzes, or a Javaslat with 0 backers, is nil.
+//
+// An Idopont scores {igen, talan, -nem}; a Javaslat scores {backers}.
 type Pontszam []int
 
 // Helyezesek ranks entries by their Pontszam and returns each entry's

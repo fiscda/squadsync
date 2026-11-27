@@ -9,6 +9,7 @@ import { buttonClass, secondaryButtonClass } from "@/lib/ui";
 
 type IdopontRow = {
   key: number;
+  egeszNapos: boolean;
   startDate: string;
   startTime: string;
   endDate: string;
@@ -103,7 +104,7 @@ export function EsemenyForm({ csoportId }: { csoportId: string }) {
         <legend className="mb-1 font-medium">Időpontok</legend>
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
           Budapesti idő szerint. A befejezés nem kötelező, és több nappal
-          későbbi is lehet.
+          későbbi is lehet. Egész napos időpontnál csak a napokat add meg.
         </p>
         {rows.map((row, i) => (
           <div
@@ -124,8 +125,32 @@ export function EsemenyForm({ csoportId }: { csoportId: string }) {
                 </button>
               ) : null}
             </div>
-            <div className="grid grid-cols-[auto_1fr_1fr] items-center gap-2">
-              <span className="text-sm text-zinc-500">Kezdés</span>
+            {/* Every row sends every field, so the server can line them up. */}
+            <input
+              type="hidden"
+              name="egeszNapos"
+              value={row.egeszNapos ? "1" : "0"}
+            />
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={row.egeszNapos}
+                onChange={(e) =>
+                  setRow(row.key, { egeszNapos: e.target.checked })
+                }
+              />
+              Egész napos
+            </label>
+            <div
+              className={`grid items-center gap-2 ${
+                row.egeszNapos
+                  ? "grid-cols-[auto_1fr]"
+                  : "grid-cols-[auto_1fr_1fr]"
+              }`}
+            >
+              <span className="text-sm text-zinc-500">
+                {row.egeszNapos ? "Első nap" : "Kezdés"}
+              </span>
               <input
                 type="date"
                 name="startDate"
@@ -138,13 +163,16 @@ export function EsemenyForm({ csoportId }: { csoportId: string }) {
               <input
                 type="time"
                 name="startTime"
-                required
+                required={!row.egeszNapos}
+                hidden={row.egeszNapos}
                 aria-label={`${i + 1}. időpont kezdő ideje`}
                 value={row.startTime}
                 onChange={(e) => setRow(row.key, { startTime: e.target.value })}
                 className={inputClass}
               />
-              <span className="text-sm text-zinc-500">Vége</span>
+              <span className="text-sm text-zinc-500">
+                {row.egeszNapos ? "Utolsó nap" : "Vége"}
+              </span>
               <input
                 type="date"
                 name="endDate"
@@ -157,6 +185,7 @@ export function EsemenyForm({ csoportId }: { csoportId: string }) {
               <input
                 type="time"
                 name="endTime"
+                hidden={row.egeszNapos}
                 aria-label={`${i + 1}. időpont záró ideje`}
                 value={row.endTime}
                 onChange={(e) => setRow(row.key, { endTime: e.target.value })}
@@ -198,5 +227,12 @@ export function EsemenyForm({ csoportId }: { csoportId: string }) {
 }
 
 function emptyRow(key: number): IdopontRow {
-  return { key, startDate: "", startTime: "", endDate: "", endTime: "" };
+  return {
+    key,
+    egeszNapos: false,
+    startDate: "",
+    startTime: "",
+    endDate: "",
+    endTime: "",
+  };
 }

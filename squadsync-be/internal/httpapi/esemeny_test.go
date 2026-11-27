@@ -149,3 +149,34 @@ func TestEsemenyRoutesRequireAFelhasznalo(t *testing.T) {
 	expectStatus(t, call(t, api, http.MethodGet, "/esemeny/x", "", headers), http.StatusBadRequest)
 	expectStatus(t, call(t, api, http.MethodGet, "/esemeny/x", "", nil), http.StatusUnauthorized)
 }
+
+func TestNonexistentLocalTimeAnswers422(t *testing.T) {
+	api := newAPI(t)
+	login(t, api, "anna", "111", "Anna")
+	c := decode[csoportResp](t, call(t, api, http.MethodPost, "/csoport", `{"name":"X"}`, as("anna")))
+	rec := call(t, api, http.MethodPost, "/csoport/"+c.ID+"/esemeny",
+		`{"title":"X","idopontok":[{"start":"2026-03-29T02:30"}]}`, as("anna"))
+	expectStatus(t, rec, http.StatusUnprocessableEntity)
+}
+
+func TestWholeDayIdopontOverHTTP(t *testing.T) {
+	api := newAPI(t)
+	login(t, api, "anna", "111", "Anna")
+	c := decode[csoportResp](t, call(t, api, http.MethodPost, "/csoport", `{"name":"X"}`, as("anna")))
+	rec := call(t, api, http.MethodPost, "/csoport/"+c.ID+"/esemeny",
+		`{"title":"Túra","idopontok":[{"start":"2026-12-05","end":"2026-12-07","egeszNapos":true}]}`, as("anna"))
+	expectStatus(t, rec, http.StatusCreated)
+	e := decode[esemenyResp](t, rec)
+	d := decode[struct {
+		Idopontok []struct {
+			Start      time.Time  `json:"start"`
+			End        *time.Time `json:"end"`
+			EgeszNapos bool       `json:"egeszNapos"`
+		} `json:"idopontok"`
+	}](t, call(t, api, http.MethodGet, "/esemeny/"+e.ID, "", as("anna")))
+	i := d.Idopontok[0]
+	if !i.EgeszNapos || !i.Start.Equal(time.Date(2026, 12, 4, 23, 0, 0, 0, time.UTC)) ||
+		i.End == nil || !i.End.Equal(time.Date(2026, 12, 7, 23, 0, 0, 0, time.UTC)) {
+		t.Fatalf("idopont = %+v", i)
+	}
+}

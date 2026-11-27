@@ -93,8 +93,8 @@ func (q Queries) InsertIdopont(ctx context.Context, i domain.Idopont) error {
 		end = formatTime(*i.End)
 	}
 	_, err := q.db.ExecContext(ctx,
-		`INSERT INTO idopont (id, esemeny_id, start_at, end_at, added_by, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		i.ID, i.EsemenyID, formatTime(i.Start), end, i.AddedBy, formatTime(i.CreatedAt),
+		`INSERT INTO idopont (id, esemeny_id, start_at, end_at, egesz_napos, added_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		i.ID, i.EsemenyID, formatTime(i.Start), end, i.EgeszNapos, i.AddedBy, formatTime(i.CreatedAt),
 	)
 	if err != nil {
 		return fmt.Errorf("insert idopont: %w", err)
@@ -102,13 +102,13 @@ func (q Queries) InsertIdopont(ctx context.Context, i domain.Idopont) error {
 	return nil
 }
 
-const idopontColumns = `id, esemeny_id, start_at, end_at, added_by, created_at`
+const idopontColumns = `id, esemeny_id, start_at, end_at, egesz_napos, added_by, created_at`
 
 func scanIdopont(row rowScanner) (domain.Idopont, error) {
 	var i domain.Idopont
 	var start, createdAt string
 	var end sql.NullString
-	if err := row.Scan(&i.ID, &i.EsemenyID, &start, &end, &i.AddedBy, &createdAt); err != nil {
+	if err := row.Scan(&i.ID, &i.EsemenyID, &start, &end, &i.EgeszNapos, &i.AddedBy, &createdAt); err != nil {
 		return domain.Idopont{}, err
 	}
 	var err error
@@ -177,19 +177,22 @@ func (q Queries) UpsertVisszajelzes(ctx context.Context, v domain.Visszajelzes) 
 	return nil
 }
 
-// ListVisszajelzesekOfEsemeny returns every Felhasznalo's Visszajelzes on the
-// Esemeny's Idopontok, with their name and whether they are a Tag of the
-// Esemeny's Csoport, ordered by name.
+// ListVisszajelzesekOfEsemeny returns every Visszajelzes on the Esemeny's
+// Idopontok with the name of whoever gave it and whether they are a Tag of
+// the Esemeny's Csoport, ordered by name. Rows not given by a Felhasznalo
+// (a name-only Vendeg's, once #13 adds them) are kept, with an empty
+// FelhasznaloID and name and IsTag false; #13 must join vendeg here to fill
+// in their name.
 func (q Queries) ListVisszajelzesekOfEsemeny(ctx context.Context, esemenyID string) ([]domain.VisszajelzesOfEsemeny, error) {
 	rows, err := q.db.QueryContext(ctx,
-		`SELECT v.idopont_id, v.felhasznalo_id, v.valasz, v.updated_at, f.name,
+		`SELECT v.idopont_id, COALESCE(v.felhasznalo_id, ''), v.valasz, v.updated_at, COALESCE(f.name, ''),
 		        EXISTS (SELECT 1 FROM tag t WHERE t.csoport_id = e.csoport_id AND t.felhasznalo_id = v.felhasznalo_id)
 		 FROM visszajelzes v
 		 JOIN idopont i ON i.id = v.idopont_id
 		 JOIN esemeny e ON e.id = i.esemeny_id
-		 JOIN felhasznalo f ON f.id = v.felhasznalo_id
+		 LEFT JOIN felhasznalo f ON f.id = v.felhasznalo_id
 		 WHERE i.esemeny_id = ?
-		 ORDER BY f.name, v.felhasznalo_id`,
+		 ORDER BY COALESCE(f.name, ''), v.felhasznalo_id`,
 		esemenyID,
 	)
 	if err != nil {

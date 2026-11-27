@@ -5,7 +5,12 @@ import type { Idopont, Valasz } from "@/lib/backend";
 import { getEsemeny } from "@/lib/esemeny";
 import { cardClass, linkClass } from "@/lib/ui";
 import { setVisszajelzesAction } from "../actions";
-import { allapotLabel, formatIdopont, valaszLabel } from "../format";
+import {
+  allapotLabel,
+  formatEgeszNapos,
+  formatIdopont,
+  valaszLabel,
+} from "../format";
 
 export default function EsemenyPage({ params }: PageProps<"/esemenyek/[id]">) {
   return (
@@ -109,7 +114,9 @@ function IdopontCard({
     <li className={`${cardClass} flex flex-col gap-3`}>
       <div className="flex items-start justify-between gap-4">
         <span className="font-medium">
-          {formatIdopont(idopont.start, idopont.end)}
+          {idopont.egeszNapos && idopont.end !== null
+            ? `${formatEgeszNapos(idopont.start, idopont.end)} (egész napos)`
+            : formatIdopont(idopont.start, idopont.end)}
         </span>
         <span className="shrink-0 text-lg font-semibold" title="Helyezés">
           <span className="sr-only">Helyezés: </span>

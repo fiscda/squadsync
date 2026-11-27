@@ -349,6 +349,11 @@ export type Idopont = {
   start: string;
   /** RFC 3339, UTC; null when it has only a start. */
   end: string | null;
+  /**
+   * A whole-day Időpont: start is Budapest midnight of the first day and end
+   * Budapest midnight after the last day. Show dates only.
+   */
+  egeszNapos: boolean;
   addedBy: string;
   /** Counts of Tags' Visszajelzések. */
   igen: number;
@@ -373,8 +378,11 @@ export type EsemenyInput = {
   title: string;
   description: string;
   helyszin: Helyszin;
-  /** Budapest wall clock times like "2026-12-05T20:00"; end may be "". */
-  idopontok: { start: string; end: string }[];
+  /**
+   * Budapest wall clock times like "2026-12-05T20:00"; end may be "". With
+   * egeszNapos, the first and last day like "2026-12-05" (both included).
+   */
+  idopontok: { start: string; end: string; egeszNapos: boolean }[];
 };
 
 export function proposeEsemeny(

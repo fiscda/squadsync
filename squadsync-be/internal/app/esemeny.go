@@ -27,13 +27,22 @@ const (
 // clock time in Europe/Budapest, to the minute.
 const LocalTimeLayout = "2006-01-02T15:04"
 
+// LocalDateLayout is how a whole-day Idopont's days arrive: a Budapest date.
+const LocalDateLayout = "2006-01-02"
+
 // Budapest is the one time zone of the app. Times are stored in UTC and
 // shown in Budapest time; there are no per-user time zones.
 var Budapest = mustLoadLocation("Europe/Budapest")
 
-// ErrNotInEgyeztetes means the Esemeny isn't in Egyeztetes, so its
-// Idopontok can't be answered (yet or any more).
-var ErrNotInEgyeztetes = errors.New("esemeny is not in egyeztetes")
+// ErrIdopontNotAnswerable means the Idopont can't be answered in the
+// Esemeny's current state. For now every Idopont is answerable in
+// Egyeztetes and none otherwise.
+var ErrIdopontNotAnswerable = errors.New("idopont is not answerable")
+
+// ErrNonexistentLocalTime means a wall clock time that never happens in
+// Budapest, because the clocks jump forward over it (the spring DST change).
+// It wraps ErrInvalidInput.
+var ErrNonexistentLocalTime = fmt.Errorf("%w: nem létező időpont az óraátállítás miatt", ErrInvalidInput)
 
 // EsemenyInput is a proposed Esemeny.
 type EsemenyInput struct {
@@ -43,12 +52,19 @@ type EsemenyInput struct {
 	Idopontok   []IdopontInput
 }
 
-// IdopontInput is one candidate time, as Budapest wall clock times in
-// LocalTimeLayout. End is optional ("" for none) and must be after Start; it
-// may be days later.
+// IdopontInput is one candidate time.
+//
+// Normally Start and End are Budapest wall clock times in LocalTimeLayout.
+// End is optional ("" for none) and must be after Start; it may be days
+// later.
+//
+// With EgeszNapos, Start and End are Budapest dates in LocalDateLayout: the
+// first and the last day, both included. End is optional ("" for a single
+// day) and must not be before Start.
 type IdopontInput struct {
-	Start string
-	End   string
+	Start      string
+	End        string
+	EgeszNapos bool
 }
 
 // EsemenyDetail is an Esemeny as one of its Csoport's Tags sees it.
@@ -162,6 +178,8 @@ func validHelyszin(h domain.Helyszin) (domain.Helyszin, error) {
 	if h.URL == "" {
 		return h, nil
 	}
+	// Only http and https: the URL becomes a link on the web, and other
+	// schemes such as javascript: would run in the viewer's browser.
 	if len(h.URL) > MaxHelyszinURLLength {
 		return domain.Helyszin{}, fmt.Errorf("%w: a helyszin URL is at most %d characters", ErrInvalidInput, MaxHelyszinURLLength)
 	}
@@ -174,6 +192,9 @@ func validHelyszin(h domain.Helyszin) (domain.Helyszin, error) {
 
 // newIdopont converts an Idopont's Budapest wall clock times to UTC.
 func newIdopont(in IdopontInput) (domain.Idopont, error) {
+	if in.EgeszNapos {
+		return newEgeszNaposIdopont(in)
+	}
 	start, err := parseLocalTime(in.Start)
 	if err != nil {
 		return domain.Idopont{}, err
@@ -193,14 +214,55 @@ func newIdopont(in IdopontInput) (domain.Idopont, error) {
 	return i, nil
 }
 
+// newEgeszNaposIdopont turns a whole-day Idopont's first and last day into
+// Budapest midnight of the first day and Budapest midnight after the last.
+func newEgeszNaposIdopont(in IdopontInput) (domain.Idopont, error) {
+	first, err := parseLocalDate(in.Start)
+	if err != nil {
+		return domain.Idopont{}, err
+	}
+	last := first
+	if strings.TrimSpace(in.End) != "" {
+		if last, err = parseLocalDate(in.End); err != nil {
+			return domain.Idopont{}, err
+		}
+	}
+	if last.Before(first) {
+		return domain.Idopont{}, fmt.Errorf("%w: the last day must not be before the first", ErrInvalidInput)
+	}
+	// AddDate on the Budapest date keeps midnight across a DST change.
+	end := last.AddDate(0, 0, 1).UTC()
+	return domain.Idopont{Start: first.UTC(), End: &end, EgeszNapos: true}, nil
+}
+
 // parseLocalTime reads a Budapest wall clock time in LocalTimeLayout and
-// returns it in UTC.
+// returns it in UTC. A time skipped by the spring DST change is refused; a
+// time that happens twice in autumn means its first occurrence.
 func parseLocalTime(s string) (time.Time, error) {
-	t, err := time.ParseInLocation(LocalTimeLayout, strings.TrimSpace(s), Budapest)
+	s = strings.TrimSpace(s)
+	t, err := time.ParseInLocation(LocalTimeLayout, s, Budapest)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("%w: a time must look like 2026-12-05T20:00", ErrInvalidInput)
 	}
+	if t.Format(LocalTimeLayout) != s {
+		return time.Time{}, fmt.Errorf("%w: %s", ErrNonexistentLocalTime, s)
+	}
+	// Go resolves an autumn overlap to its second occurrence; take the first
+	// (still summer time), one DST shift earlier, when it reads the same.
+	if earlier := t.Add(-time.Hour); earlier.In(Budapest).Format(LocalTimeLayout) == s {
+		t = earlier
+	}
 	return t.UTC(), nil
+}
+
+// parseLocalDate reads a date in LocalDateLayout and returns Budapest
+// midnight of that day, in Budapest time.
+func parseLocalDate(s string) (time.Time, error) {
+	t, err := time.ParseInLocation(LocalDateLayout, strings.TrimSpace(s), Budapest)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%w: a day must look like 2026-12-05", ErrInvalidInput)
+	}
+	return t, nil
 }
 
 // EsemenyekOfCsoport lists a Csoport's Esemenyek, newest first. Only Tags
@@ -292,7 +354,7 @@ func idopontAllasok(idopontok []domain.Idopont, visszajelzesek []domain.Visszaje
 // Esemeny, replacing any earlier answer. Only Tags of the Esemeny's Csoport
 // may answer; anyone else, and an Idopont of another Esemeny, gets
 // ErrNotFound. Answering is open while the Esemeny is in Egyeztetes;
-// otherwise it gives ErrNotInEgyeztetes.
+// otherwise it gives ErrIdopontNotAnswerable.
 func (a *App) SetVisszajelzes(ctx context.Context, felhasznaloID, esemenyID, idopontID string, valasz domain.Valasz) error {
 	if !valasz.Valid() {
 		return fmt.Errorf("%w: a visszajelzes is igen, talan or nem", ErrInvalidInput)
@@ -310,7 +372,7 @@ func (a *App) SetVisszajelzes(ctx context.Context, felhasznaloID, esemenyID, ido
 			return ErrNotFound
 		}
 		if e.Allapot != domain.Egyeztetes {
-			return ErrNotInEgyeztetes
+			return ErrIdopontNotAnswerable
 		}
 		return q.UpsertVisszajelzes(ctx, domain.Visszajelzes{
 			IdopontID:     i.ID,
