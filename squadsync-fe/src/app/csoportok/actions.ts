@@ -7,6 +7,7 @@ import {
   createCsoport,
   createCsoportMeghivo,
   revokeCsoportMeghivo,
+  unlinkCsatorna,
 } from "@/lib/backend";
 import { requireFelhasznalo } from "@/lib/felhasznalo";
 
@@ -69,6 +70,26 @@ export async function revokeMeghivoAction(
       redirect("/csoportok");
     }
     throw err;
+  }
+  revalidatePath(`/csoportok/${csoportId}`);
+}
+
+/**
+ * Unlinks the Csoport's Discord channel. Only Admins see the button; a 403
+ * or 404 means the page is stale, so just show it again.
+ */
+export async function unlinkCsatornaAction(csoportId: string) {
+  const felhasznalo = await requireFelhasznalo();
+  try {
+    await unlinkCsatorna(felhasznalo.id, csoportId);
+  } catch (err) {
+    unstable_rethrow(err);
+    if (err instanceof BackendError && err.status === 404) {
+      redirect("/csoportok");
+    }
+    if (!(err instanceof BackendError && err.status === 403)) {
+      throw err;
+    }
   }
   revalidatePath(`/csoportok/${csoportId}`);
 }
