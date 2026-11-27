@@ -1,5 +1,6 @@
 import "server-only";
 import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { cache } from "react";
 import { auth } from "./auth";
 import { type Felhasznalo, firstLogin, getFelhasznalo } from "./backend";
@@ -32,16 +33,17 @@ export const getCurrentFelhasznalo = cache(
  * Auth hook; this covers a hook call that failed (for example, Go was down).
  *
  * It's a mutation, so call it only from a route handler or a server action,
- * never while rendering. Returns false when nobody is logged in.
+ * never while rendering. Returns the Felhasználó's id, or null when nobody is
+ * logged in.
  */
-export async function ensureFelhasznalo(): Promise<boolean> {
+export async function ensureFelhasznalo(): Promise<string | null> {
   const requestHeaders = await headers();
   const session = await auth.api.getSession({ headers: requestHeaders });
   if (!session) {
-    return false;
+    return null;
   }
   if (await getFelhasznalo(session.user.id)) {
-    return true;
+    return session.user.id;
   }
 
   const accounts = await auth.api.listUserAccounts({
@@ -55,5 +57,34 @@ export async function ensureFelhasznalo(): Promise<boolean> {
     discordId: discord.accountId,
     name: session.user.name,
   });
-  return true;
+  return session.user.id;
+}
+
+/**
+ * The guard for pages that need a login: the logged-in Felhasználó, or a
+ * redirect to the home page, which offers the login (or the retry when Go
+ * doesn't know them yet). Read-only, so it's safe while rendering.
+ */
+export async function requireFelhasznalo(): Promise<Felhasznalo> {
+  const current = await getCurrentFelhasznalo();
+  if (current.status !== "ok") {
+    redirect("/");
+  }
+  return current.felhasznalo;
+}
+
+/**
+ * Starts the Discord login and returns the Discord URL to send the browser
+ * to. After Discord, Better Auth redirects to callbackURL, which must be a
+ * path on this site.
+ */
+export async function discordLoginUrl(callbackURL: string): Promise<string> {
+  const { url } = await auth.api.signInSocial({
+    body: { provider: "discord", callbackURL },
+    headers: await headers(),
+  });
+  if (!url) {
+    throw new Error("Better Auth returned no Discord authorization URL");
+  }
+  return url;
 }

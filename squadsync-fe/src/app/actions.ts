@@ -3,19 +3,12 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { ensureFelhasznalo } from "@/lib/felhasznalo";
+import { discordLoginUrl, ensureFelhasznalo } from "@/lib/felhasznalo";
 
 export async function signInWithDiscord() {
-  const { url } = await auth.api.signInSocial({
-    // After Discord, Better Auth redirects to this route handler, which
-    // makes sure Go knows the Felhasználó.
-    body: { provider: "discord", callbackURL: "/login/complete" },
-    headers: await headers(),
-  });
-  if (!url) {
-    throw new Error("Better Auth returned no Discord authorization URL");
-  }
-  redirect(url);
+  // After Discord, Better Auth redirects to this route handler, which makes
+  // sure Go knows the Felhasználó.
+  redirect(await discordLoginUrl("/login/complete"));
 }
 
 /** Retries telling Go about the logged-in Felhasználó. */

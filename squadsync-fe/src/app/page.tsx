@@ -1,9 +1,8 @@
+import Link from "next/link";
 import { Suspense } from "react";
 import { getCurrentFelhasznalo } from "@/lib/felhasznalo";
+import { buttonClass } from "@/lib/ui";
 import { retryFirstLogin, signInWithDiscord, signOut } from "./actions";
-
-const buttonClass =
-  "rounded-full bg-foreground px-5 py-3 font-medium text-background transition-opacity hover:opacity-80";
 
 export default function Home() {
   return (
@@ -63,6 +62,9 @@ async function Greeting() {
       <p className="text-zinc-600 dark:text-zinc-400">
         {since} óta használod a Squad Syncet.
       </p>
+      <Link href="/csoportok" className={buttonClass}>
+        Csoportjaim
+      </Link>
       <form action={signOut}>
         <button type="submit" className={buttonClass}>
           Kilépés
