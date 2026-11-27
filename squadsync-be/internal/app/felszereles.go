@@ -428,9 +428,13 @@ func felszerelesSummary(ctx context.Context, t *kiegeszitoTx) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	hianyzik := 0
+	hianyzik, claimable := 0, false
 	for _, allas := range tetelek {
 		hianyzik += allas.Hianyzik
+		claimable = claimable || !allas.MindenkiHozza
+	}
+	if !claimable {
+		return "", nil // nothing to bring that anyone claims
 	}
 	if hianyzik > 0 {
 		return fmt.Sprintf("🎒 %d hiányzik", hianyzik), nil

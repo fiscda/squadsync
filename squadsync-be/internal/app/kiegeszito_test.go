@@ -303,3 +303,68 @@ func TestReopeningFreezesClaimsAndReConfirmingDropsThoseOfNonResztvevok(t *testi
 	}
 	vallal(t, h, "bela", d.ID, sator.ID, 3)
 }
+
+func TestATagWhoLeavesOrIsRemovedLosesTheirClaims(t *testing.T) {
+	for name, leave := range map[string]func(h *apptest.Harness, csoportID string) error{
+		"leaving": func(h *apptest.Harness, csoportID string) error {
+			return h.App.LeaveCsoport(context.Background(), "bela", csoportID)
+		},
+		"removed by an Admin": func(h *apptest.Harness, csoportID string) error {
+			return h.App.RemoveTag(context.Background(), "anna", csoportID, "bela")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h, d, sator := tripWithFelszereles(t)
+			// Another Esemeny of the Csoport, in Egyeztetes, keeps frozen claims.
+			other := propose(t, h, "anna", d.CsoportID, 1)
+			od := detail(t, h, "anna", other.ID)
+			switchKiegeszito(t, h, "anna", other.ID, domain.Felszereles, true)
+			otherSator := addTetel(t, h, "anna", other.ID, "sátor", 1)
+			answer(t, h, "bela", od, 0, domain.Igen)
+			confirm(t, h, "anna", od, 0)
+			vallal(t, h, "bela", other.ID, otherSator.ID, 1)
+			reopen(t, h, "anna", other.ID)
+
+			answer(t, h, "bela", d, 0, domain.Igen)
+			answer(t, h, "cecil", d, 0, domain.Igen)
+			confirm(t, h, "anna", d, 0)
+			vallal(t, h, "bela", d.ID, sator.ID, 2)
+			vallal(t, h, "cecil", d.ID, sator.ID, 1)
+			edits := len(h.Discord.Edits())
+
+			if err := leave(h, d.CsoportID); err != nil {
+				t.Fatalf("Bela leaving: %v", err)
+			}
+
+			expectVallalasok(t, felszereles(t, h, "anna", d.ID), "sátor:cecil=1")
+			expectVallalasok(t, felszereles(t, h, "anna", other.ID), "sátor:bela=1")
+			if dms := dropOutDMs(h); len(dms) != 0 {
+				t.Fatalf("drop-out DMs = %+v, want none", dms)
+			}
+			if len(h.Discord.Edits()) == edits {
+				t.Fatalf("the Esemeny's messages weren't re-rendered")
+			}
+		})
+	}
+}
+
+func TestAKiegeszitoCanAllowSwitchingInOtherStates(t *testing.T) {
+	h, d, _ := tripWithFelszereles(t)
+	ctx := context.Background()
+	answer(t, h, "bela", d, 0, domain.Igen)
+	confirm(t, h, "anna", d, 0)
+	// Lezajlott is set by a timed job (#9); set it directly here.
+	if err := h.Store.UpdateEsemenyAllapot(ctx, d.ID, domain.Lezajlott, d.Idopontok[0].ID); err != nil {
+		t.Fatalf("UpdateEsemenyAllapot: %v", err)
+	}
+	if err := h.App.SetKiegeszito(ctx, "anna", d.ID, domain.Felszereles, false); !errors.Is(err, app.ErrKiegeszitoLocked) {
+		t.Fatalf("switching once Lezajlott: err = %v, want ErrKiegeszitoLocked", err)
+	}
+
+	h.App.SetSwitchable(domain.Felszereles, func(e domain.Esemeny) bool { return e.Allapot != domain.Elmaradt })
+
+	if got := detail(t, h, "anna", d.ID).Kiegeszitok; !got[0].Switchable {
+		t.Fatalf("kiegeszitok = %+v, want Felszereles switchable", got)
+	}
+	switchKiegeszito(t, h, "anna", d.ID, domain.Felszereles, false)
+}

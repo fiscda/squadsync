@@ -17,3 +17,11 @@ func (a *App) VetoSwitchOff(kind domain.KiegeszitoKind, err error) {
 	}
 	a.kiegeszitok[kind] = k
 }
+
+// SetSwitchable gives this App's Kiegeszito of the given kind its own rule
+// for when it can be switched (nil restores the default).
+func (a *App) SetSwitchable(kind domain.KiegeszitoKind, switchable func(domain.Esemeny) bool) {
+	k := a.kiegeszitok[kind]
+	k.switchable = switchable
+	a.kiegeszitok[kind] = k
+}

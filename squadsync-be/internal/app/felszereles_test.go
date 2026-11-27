@@ -198,8 +198,14 @@ func TestTheEsemenyMessageSummarisesFelszereles(t *testing.T) {
 	}
 
 	switchKiegeszito(t, h, "anna", e.ID, domain.Felszereles, true)
-	if got := lastSummary(); got != "🎒 minden megvan" {
-		t.Fatalf("summary with an empty list = %q", got)
+	if got := lastSummary(); got != "" {
+		t.Fatalf("summary with an empty list = %q, want none", got)
+	}
+	if _, err := h.App.AddTetel(context.Background(), "anna", e.ID, app.TetelInput{Name: "hálózsák", MindenkiHozza: true}); err != nil {
+		t.Fatalf("AddTetel: %v", err)
+	}
+	if got := lastSummary(); got != "" {
+		t.Fatalf("summary with only mindenki hozza Tetelek = %q, want none", got)
 	}
 	sator := addTetel(t, h, "anna", e.ID, "sátor", 3)
 	if got := lastSummary(); got != "🎒 3 hiányzik" {
@@ -218,5 +224,27 @@ func TestTheEsemenyMessageSummarisesFelszereles(t *testing.T) {
 	switchKiegeszito(t, h, "anna", e.ID, domain.Felszereles, false)
 	if got := lastSummary(); got != "" {
 		t.Fatalf("summary once switched off = %q, want none", got)
+	}
+}
+
+func TestAClaimedTetelCantBecomeMindenkiHozza(t *testing.T) {
+	h, d, sator := confirmedTrip(t)
+	vallal(t, h, "bela", d.ID, sator.ID, 1)
+
+	err := h.App.UpdateTetel(context.Background(), "anna", d.ID, sator.ID, app.TetelInput{Name: "sátor", Quantity: 3, MindenkiHozza: true})
+	if !errors.Is(err, app.ErrTetelClaimed) {
+		t.Fatalf("marking a claimed Tetel mindenki hozza: err = %v, want ErrTetelClaimed", err)
+	}
+	f := felszereles(t, h, "anna", d.ID)
+	if allas := tetelAllas(t, f, sator.ID); allas.MindenkiHozza || allas.Vallalt != 1 {
+		t.Fatalf("tetel = %+v, want it unchanged with its claim", allas)
+	}
+
+	vallal(t, h, "bela", d.ID, sator.ID, 0)
+	if err := h.App.UpdateTetel(context.Background(), "anna", d.ID, sator.ID, app.TetelInput{Name: "sátor", MindenkiHozza: true}); err != nil {
+		t.Fatalf("marking it once unclaimed: %v", err)
+	}
+	if allas := tetelAllas(t, felszereles(t, h, "bela", d.ID), sator.ID); !allas.MindenkiHozza || allas.Hianyzik != 0 {
+		t.Fatalf("tetel = %+v, want a mindenki hozza reminder", allas)
 	}
 }

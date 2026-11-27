@@ -7,7 +7,8 @@ import type { KiegeszitoPanelProps } from "./panel-props";
  * Every Kiegészítő as the Esemény page shows it. To add one, write its panel
  * (kiegeszitok/<kind>/panel.tsx, a server component that fetches its own
  * data) and set Panel on its entry below. hibak words the error codes its
- * Go routes answer with, shown above the page as ?hiba=<code>.
+ * Go routes answer with, shown above the page as ?hiba=<code>; prefix them
+ * with the kind ("felszereles_too_much") so they never clash.
  *
  * The toggles list only the Kiegészítők Go reports (the built ones); one
  * without a Panel shows nothing when switched on.
@@ -31,9 +32,11 @@ export const kiegeszitoRegistry: Record<
     icon: "🎒",
     Panel: FelszerelesPanel,
     hibak: {
-      too_much: "Ennyit nem vállalhatsz: többet, mint ami még hiányzik.",
-      mindenki_hozza: "Ezt mindenki maga hozza, nem lehet vállalni.",
-      tetel_claimed:
+      felszereles_too_much:
+        "Ennyit nem vállalhatsz: többet, mint ami még hiányzik.",
+      felszereles_mindenki_hozza:
+        "Ezt mindenki maga hozza, nem lehet vállalni.",
+      felszereles_tetel_claimed:
         "Ez a módosítás ütközik a vállalásokkal: a mennyiség nem lehet kevesebb a vállaltnál, és vállalt tétel nem lehet „mindenki hozza”.",
     },
   },

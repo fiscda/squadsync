@@ -411,7 +411,7 @@ func (a *App) SetVisszajelzes(ctx context.Context, felhasznaloID, esemenyID, ido
 	}
 	var dropOut *gateway.DropOut
 	var szervezoID, csoportID string
-	var released []func(context.Context)
+	var released []kiegeszitoJob
 	err := a.store.InTx(ctx, func(q store.Queries) error {
 		e, err := requireEsemenyTag(ctx, q, esemenyID, felhasznaloID)
 		if err != nil {
@@ -467,9 +467,7 @@ func (a *App) SetVisszajelzes(ctx context.Context, felhasznaloID, esemenyID, ido
 		return err
 	}
 	a.afterCommit(func(ctx context.Context) {
-		for _, job := range released {
-			job(ctx)
-		}
+		a.runKiegeszitoJobs(ctx, released)
 		a.refreshEsemenyMessages(ctx, esemenyID)
 		if dropOut != nil {
 			a.sendDropOutDM(ctx, csoportID, szervezoID, *dropOut)

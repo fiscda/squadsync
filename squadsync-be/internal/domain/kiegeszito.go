@@ -39,7 +39,9 @@ type ClaimHolder struct {
 	VendegID string
 }
 
-// HolderOf is the ClaimHolder of a Resztvevo.
+// HolderOf is the ClaimHolder of a Resztvevo. #13 must return the
+// VendegID of a name-only Vendeg here, once Resztvevo carries it; until
+// then every Resztvevo is a Felhasznalo.
 func HolderOf(r Resztvevo) ClaimHolder {
 	return ClaimHolder{FelhasznaloID: r.FelhasznaloID}
 }

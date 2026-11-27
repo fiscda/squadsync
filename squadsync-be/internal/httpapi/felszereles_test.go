@@ -101,8 +101,8 @@ func TestFelszerelesOverHTTP(t *testing.T) {
 	}
 	rec = call(t, api, http.MethodPut, vallalas, `{"quantity":4}`, as("bela"))
 	expectStatus(t, rec, http.StatusConflict)
-	if e := decode[errorResp](t, rec); e.Code != "too_much" {
-		t.Fatalf("code = %q, want too_much", e.Code)
+	if e := decode[errorResp](t, rec); e.Code != "felszereles_too_much" {
+		t.Fatalf("code = %q, want felszereles_too_much", e.Code)
 	}
 
 	f := decode[felszerelesResp](t, call(t, api, http.MethodGet, base, "", as("bela")))
@@ -117,15 +117,15 @@ func TestFelszerelesOverHTTP(t *testing.T) {
 	halozsak := f.Tetelek[1]
 	rec = call(t, api, http.MethodPut, base+"/tetel/"+halozsak.ID+"/vallalas", `{"quantity":1}`, as("bela"))
 	expectStatus(t, rec, http.StatusConflict)
-	if e := decode[errorResp](t, rec); e.Code != "mindenki_hozza" {
-		t.Fatalf("code = %q, want mindenki_hozza", e.Code)
+	if e := decode[errorResp](t, rec); e.Code != "felszereles_mindenki_hozza" {
+		t.Fatalf("code = %q, want felszereles_mindenki_hozza", e.Code)
 	}
 
 	// Editing and deleting.
 	rec = call(t, api, http.MethodPut, base+"/tetel/"+sator.ID, `{"name":"sátor","quantity":1}`, as("bela"))
 	expectStatus(t, rec, http.StatusConflict)
-	if e := decode[errorResp](t, rec); e.Code != "tetel_claimed" {
-		t.Fatalf("code = %q, want tetel_claimed", e.Code)
+	if e := decode[errorResp](t, rec); e.Code != "felszereles_tetel_claimed" {
+		t.Fatalf("code = %q, want felszereles_tetel_claimed", e.Code)
 	}
 	expectStatus(t, call(t, api, http.MethodPut, base+"/tetel/"+sator.ID, `{"name":"nagy sátor","quantity":2}`, as("bela")), http.StatusNoContent)
 	rec = call(t, api, http.MethodDelete, base+"/tetel/"+halozsak.ID, "", as("bela"))

@@ -26,7 +26,7 @@ export async function runKiegeszitoChange(
           ? "nincs"
           : err.status === 400
             ? "ervenytelen"
-            : err.code;
+            : (err.code ?? "");
       if ([400, 403, 404, 409].includes(err.status) && hiba !== "") {
         revalidatePath(page);
         // A non-Tag gets the page's own 404.

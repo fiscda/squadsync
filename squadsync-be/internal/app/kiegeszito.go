@@ -10,37 +10,90 @@ import (
 	"squadsync-be/internal/store"
 )
 
-// The Kiegeszito framework: the mechanics every Kiegeszito shares. Each
-// Kiegeszito lives in its own file and plugs in by calling
-// registerKiegeszito from an init function, so adding one touches no file
-// of another (see the kiegeszito struct for the hooks).
+// The Kiegeszito framework: the mechanics every Kiegeszito shares.
 //
 //   - Switching: the Szervezo switches each Kiegeszito on or off per
-//     Esemeny (SetKiegeszito), only while it is in Egyeztetes or
-//     Veglegesitve (kiegeszitoSwitchable). Switching off hides the data and
-//     never deletes it; switching back on shows it unchanged. A Kiegeszito
-//     can veto being switched off (vetoSwitchOff).
+//     Esemeny (SetKiegeszito), by default only in Egyeztetes and
+//     Veglegesitve (a Kiegeszito can override this with switchable).
+//     Switching off hides the data and never deletes it; switching back on
+//     shows it unchanged. A Kiegeszito can veto being switched off
+//     (vetoSwitchOff).
 //   - Setup (adding and editing things) is allowed in Egyeztetes and
 //     Veglegesitve (requireSetupAllowed). Claiming is allowed only in
-//     Veglegesitve, and only for Resztvevok (requireClaimAllowed).
+//     Veglegesitve, and only for Resztvevok (requireClaimAllowed, or
+//     requireClaimAllowedBy when the Szervezo may move people).
 //   - Claims follow participation, inside the transaction of the change:
-//     a drop-out releases all of that Felhasznalo's claims (SetVisszajelzes),
-//     reopening Egyeztetes freezes them (claiming needs Veglegesitve), and
-//     re-confirming drops the claims of everyone who isn't a Resztvevo of
-//     the newly confirmed Idopont (ConfirmIdopont). Both go through
-//     releaseClaims.
+//     a drop-out from igen (SetVisszajelzes) and a Tag leaving or being
+//     removed from the Csoport (deleteTag) release all of that
+//     Felhasznalo's claims; reopening Egyeztetes freezes them (claiming
+//     needs Veglegesitve); re-confirming drops the claims of everyone who
+//     isn't a Resztvevo of the newly confirmed Idopont (ConfirmIdopont).
+//     All of them go through releaseClaims.
 //   - Discord: every enabled Kiegeszito adds a fragment to the summary line
 //     of the Esemeny's message (summary). Every use case that changes a
 //     Kiegeszito ends with kiegeszitoChanged, which re-renders the message
 //     through the refresh job (the one writer of the message).
+//
+// # How to add a Kiegeszito
+//
+//  1. Migration (your own timestamp). Tables hang off esemeny (id) ON
+//     DELETE CASCADE, and every Felhasznalo id column declares REFERENCES
+//     felhasznalo (id). A claim table copies tetel_vallalas
+//     (202611281601_felszereles.sql): felhasznalo_id REFERENCES
+//     felhasznalo (id), vendeg_id TEXT with no REFERENCES yet (#13 adds it),
+//     CHECK ((felhasznalo_id IS NULL) <> (vendeg_id IS NULL)) and a
+//     partial unique index on each. The kind enum and its CHECK already
+//     list all six kinds.
+//  2. Store: store/<kind>.go, methods on store.Queries.
+//  3. Core: app/<kind>.go registers from its own init, with any of the
+//     hooks of the kiegeszito struct below (see their docs):
+//
+//     func init() {
+//     	registerKiegeszito(kiegeszito{
+//     		kind:          domain.Autok,
+//     		releaseClaims: releaseUlesek,
+//     		summary:       autokSummary,
+//     	})
+//     }
+//
+//     Each use case starts with requireKiegeszitoOn, then calls
+//     requireSetupAllowed for setup, or requireClaimAllowed (claiming for
+//     oneself) or requireClaimAllowedBy(..., true) (the Szervezo moving
+//     people, #17 and #18) for claims, and ends every write with
+//     a.kiegeszitoChanged(esemenyID). Composable helpers: isResztvevo,
+//     canClaim, ErrNotPermitted for "not yours". Kiegeszito errors live in
+//     its file.
+//  4. HTTP: httpapi/<kind>.go with register<Kind>(mux), one line in New in
+//     httpapi.go. Map your own errors with writeCodedError and a code
+//     prefixed with the kind ("autok_full"), then fall back to
+//     writeKiegeszitoError.
+//  5. Web: lib/kiegeszito/<kind>.ts (server-only, callBackend, a cache()d
+//     getter); app/esemenyek/[id]/kiegeszitok/<kind>/panel.tsx (an async
+//     server component taking KiegeszitoPanelProps) and <kind>/actions.ts
+//     (each action wrapped in runKiegeszitoChange); in
+//     kiegeszitok/registry.tsx set Panel on your pre-filled entry and add
+//     hibak for your prefixed codes.
+//  6. Tests: core tests in app_test through the use cases; httptest tests
+//     for the routes. export_test.go has VetoSwitchOff and SetSwitchable.
+//
+// # Koltsegek (#20) and Elszamolas (#22)
+//
+// Koltsegek doesn't fit requireSetupAllowed or requireClaimAllowed: a
+// Kiadas is recorded after the Esemeny took place too. Its writes need a
+// guard of its own: the Esemeny is Veglegesitve or Lezajlott, the actor is
+// a Resztvevo (isResztvevo works in both), and no Elszamolas has been
+// calculated yet. It registers vetoSwitchOff (not while it has Kiadasok)
+// and no releaseClaims (Kiadasok are never touched automatically). Whether
+// Koltsegek can be switched on in Lezajlott is #22's call; switchable is
+// the hook for it.
 
 // Errors of the Kiegeszito framework, shared by every Kiegeszito.
 var (
 	// ErrKiegeszitoOff means the Kiegeszito is switched off for the
 	// Esemeny, so its data is hidden.
 	ErrKiegeszitoOff = errors.New("the kiegeszito is switched off")
-	// ErrKiegeszitoLocked means Kiegeszitok can't be switched on or off in
-	// the Esemeny's state (Elmaradt, Lezajlott).
+	// ErrKiegeszitoLocked means the Kiegeszito can't be switched on or off
+	// in the Esemeny's state (by default Elmaradt and Lezajlott).
 	ErrKiegeszitoLocked = errors.New("kiegeszitok can't be switched in this esemeny state")
 	// ErrKiegeszitoInUse means the Kiegeszito vetoed being switched off.
 	// A veto wraps it with the reason.
@@ -59,10 +112,35 @@ var (
 	ErrNotPermitted = errors.New("not permitted")
 )
 
+// kiegeszitoJob is work a hook queues for after the use case commits, such
+// as a DM. It gets the App, never the transaction. The rules:
+//
+//   - Read everything it needs inside the transaction and capture plain
+//     values (ids, names, texts), never t.q or t itself: the transaction
+//     is over when the job runs.
+//   - Use only the DM and Discord helpers (a.sendDropOutDM and the like,
+//     a.refreshEsemenyMessages). Never call a use case: in sync mode that
+//     deadlocks the Discord work queue.
+//   - The queue is lossy (a restart drops it): never use it for anything
+//     that must happen, such as creating a Spotify playlist.
+type kiegeszitoJob func(ctx context.Context, a *App)
+
+// runKiegeszitoJobs runs queued jobs, from inside an afterCommit job.
+func (a *App) runKiegeszitoJobs(ctx context.Context, jobs []kiegeszitoJob) {
+	for _, job := range jobs {
+		job(ctx, a)
+	}
+}
+
 // kiegeszito is how one Kiegeszito plugs into the framework. Only kind is
 // required; a nil hook means the Kiegeszito doesn't take part in it.
 type kiegeszito struct {
 	kind domain.KiegeszitoKind
+
+	// switchable overrides in which states of the Esemeny the Szervezo can
+	// switch the Kiegeszito on or off; nil means Egyeztetes and
+	// Veglegesitve. (#20/#22 may allow Koltsegek in Lezajlott.)
+	switchable func(e domain.Esemeny) bool
 
 	// vetoSwitchOff runs in the transaction before the Kiegeszito is
 	// switched off. An error keeps it on and is returned to the Szervezo;
@@ -71,16 +149,22 @@ type kiegeszito struct {
 	vetoSwitchOff func(ctx context.Context, t *kiegeszitoTx) error
 
 	// switchedOn runs in the transaction each time the Kiegeszito goes from
-	// off to on. Outside calls (Spotify, #23) belong in t.afterCommit.
+	// off to on, so it must be idempotent: Lejatszasi lista (#23) creates
+	// its playlist only when none is stored yet. An external call (Spotify)
+	// never goes in t.afterCommit, whose queue is lossy: store a durable
+	// job row (the timed jobs of #9) in this transaction, and let that job
+	// make the call and store the playlist id in a transaction of its own.
 	switchedOn func(ctx context.Context, t *kiegeszitoTx) error
 
 	// releaseClaims releases, in the transaction, every claim whose holder
 	// release reports true, and returns what was freed in short Hungarian
-	// fragments for the Szervezo ("2 db sátor"). It runs on drop-outs (only
-	// that Felhasznalo) and on re-confirmation (everyone who isn't a
-	// Resztvevo), whether the Kiegeszito is on or off, because claims follow
-	// participation. DMs it causes (a Sofor's passengers, #17) go in
-	// t.afterCommit. Koltsegek has none: Kiadasok are never touched.
+	// fragments for the Szervezo ("2 db sátor"). It runs on drop-outs and
+	// on a Tag leaving (only that Felhasznalo) and on re-confirmation
+	// (everyone who isn't a Resztvevo), whether the Kiegeszito is on or off,
+	// because claims follow participation. Only when t.enabled is true may
+	// it queue DMs (a Sofor's passengers, #17) with t.afterCommit: a hidden
+	// Kiegeszito changes silently. Koltsegek has none: Kiadasok are never
+	// touched.
 	releaseClaims func(ctx context.Context, t *kiegeszitoTx, release func(domain.ClaimHolder) bool) ([]string, error)
 
 	// summary is the Kiegeszito's short fragment of the summary line in the
@@ -127,20 +211,24 @@ func (a *App) registered() []kiegeszito {
 }
 
 // kiegeszitoTx is what a hook gets: the App, the queries (of the use case's
-// transaction, except for summary), the Esemeny as the change leaves it, and
-// a way to run work once the transaction commits.
+// transaction, except for summary), the Esemeny as the change leaves it,
+// whether the hook's Kiegeszito is on, and a way to queue work for after
+// the commit.
 type kiegeszitoTx struct {
 	a *App
 	q store.Queries
 	e domain.Esemeny
+	// enabled tells whether the Kiegeszito whose hook runs is on. Only then
+	// may a releaser queue DMs.
+	enabled bool
 
-	after      []func(context.Context)
+	after      []kiegeszitoJob
 	resztvevok []domain.Resztvevo
 }
 
-// afterCommit queues work, such as a DM, to run once the use case commits
-// (see App.afterCommit).
-func (t *kiegeszitoTx) afterCommit(job func(context.Context)) {
+// afterCommit queues work to run once the use case commits. See
+// kiegeszitoJob for the rules.
+func (t *kiegeszitoTx) afterCommit(job kiegeszitoJob) {
 	t.after = append(t.after, job)
 }
 
@@ -174,24 +262,27 @@ func (a *App) kiegeszitoAllapotok(ctx context.Context, q store.Queries, e domain
 	}
 	out := []KiegeszitoAllapot{}
 	for _, k := range a.registered() {
-		out = append(out, KiegeszitoAllapot{Kind: k.kind, Enabled: enabled[k.kind], Switchable: kiegeszitoSwitchable(e, k.kind)})
+		out = append(out, KiegeszitoAllapot{Kind: k.kind, Enabled: enabled[k.kind], Switchable: kiegeszitoSwitchable(e, k)})
 	}
 	return out, nil
 }
 
-// kiegeszitoSwitchable tells whether a Kiegeszito can be switched on or off
-// in the Esemeny's state: in Egyeztetes and Veglegesitve. Elmaradt and
-// Lezajlott freeze them. (#22 may let Koltsegek through in Lezajlott here.)
-func kiegeszitoSwitchable(e domain.Esemeny, _ domain.KiegeszitoKind) bool {
+// kiegeszitoSwitchable tells whether the Kiegeszito can be switched on or
+// off in the Esemeny's state: its own switchable rule if it has one, or
+// else Egyeztetes and Veglegesitve. Elmaradt and Lezajlott freeze them.
+func kiegeszitoSwitchable(e domain.Esemeny, k kiegeszito) bool {
+	if k.switchable != nil {
+		return k.switchable(e)
+	}
 	return e.Allapot == domain.Egyeztetes || e.Allapot == domain.Veglegesitve
 }
 
 // SetKiegeszito switches one Kiegeszito of an Esemeny on or off. Only the
 // Szervezo may: a non-Tag gets ErrNotFound, another Tag ErrNotSzervezo. An
-// unknown (or not yet built) Kiegeszito gives ErrInvalidInput, an Esemeny
-// that is Elmaradt or Lezajlott ErrKiegeszitoLocked, and a veto an error
-// wrapping ErrKiegeszitoInUse. Switching to the state it is already in
-// changes nothing.
+// unknown (or not yet built) Kiegeszito gives ErrInvalidInput, a state it
+// can't be switched in ErrKiegeszitoLocked, and a veto an error wrapping
+// ErrKiegeszitoInUse. Switching to the state it is already in changes
+// nothing.
 func (a *App) SetKiegeszito(ctx context.Context, felhasznaloID, esemenyID string, kind domain.KiegeszitoKind, enabled bool) error {
 	k, ok := a.kiegeszitok[kind]
 	if !ok {
@@ -203,7 +294,7 @@ func (a *App) SetKiegeszito(ctx context.Context, felhasznaloID, esemenyID string
 		if err != nil {
 			return err
 		}
-		if !kiegeszitoSwitchable(e, kind) {
+		if !kiegeszitoSwitchable(e, k) {
 			return ErrKiegeszitoLocked
 		}
 		on, err := q.EnabledKiegeszitok(ctx, e.ID)
@@ -213,7 +304,8 @@ func (a *App) SetKiegeszito(ctx context.Context, felhasznaloID, esemenyID string
 		if on[kind] == enabled {
 			return nil
 		}
-		t = &kiegeszitoTx{a: a, q: q, e: e}
+		// Both hooks run while it is (still or already) on.
+		t = &kiegeszitoTx{a: a, q: q, e: e, enabled: true}
 		if !enabled && k.vetoSwitchOff != nil {
 			if err := k.vetoSwitchOff(ctx, t); err != nil {
 				return err
@@ -236,12 +328,10 @@ func (a *App) SetKiegeszito(ctx context.Context, felhasznaloID, esemenyID string
 
 // kiegeszitoChanged re-renders the Esemeny's Discord messages (for the
 // summary line) once the use case commits, after running the hooks' queued
-// work. Every use case that changes a Kiegeszito calls it.
-func (a *App) kiegeszitoChanged(esemenyID string, after ...func(context.Context)) {
+// jobs. Every use case that changes a Kiegeszito calls it.
+func (a *App) kiegeszitoChanged(esemenyID string, after ...kiegeszitoJob) {
 	a.afterCommit(func(ctx context.Context) {
-		for _, job := range after {
-			job(ctx)
-		}
+		a.runKiegeszitoJobs(ctx, after)
 		a.refreshEsemenyMessages(ctx, esemenyID)
 	})
 }
@@ -272,6 +362,7 @@ func setupAllowed(e domain.Esemeny) bool {
 
 // requireSetupAllowed refuses setup outside Egyeztetes and Veglegesitve
 // with ErrSetupClosed. Who may set up is each Kiegeszito's own rule.
+// Koltsegek doesn't use it (see the top of this file).
 func requireSetupAllowed(e domain.Esemeny) error {
 	if !setupAllowed(e) {
 		return ErrSetupClosed
@@ -279,22 +370,34 @@ func requireSetupAllowed(e domain.Esemeny) error {
 	return nil
 }
 
-// requireClaimAllowed lets actorID make or change a claim for holder:
+// requireClaimAllowed lets actorID make or change a claim for themselves or
+// their name-only Vendeg: requireClaimAllowedBy without the Szervezo's
+// leeway.
+func requireClaimAllowed(ctx context.Context, q store.Queries, e domain.Esemeny, actorID string, holder domain.ClaimHolder) error {
+	return requireClaimAllowedBy(ctx, q, e, actorID, holder, false)
+}
+
+// requireClaimAllowedBy lets actorID make, change or remove a claim for
+// holder:
 //
 //   - only while the Esemeny is Veglegesitve (ErrClaimingClosed), so claims
 //     are frozen while it is back in Egyeztetes;
-//   - for themselves (ErrNotPermitted for another Felhasznalo), or (#13)
-//     for a name-only Vendeg they added, which #13 checks here; until then
-//     a Vendeg is ErrNotFound;
-//   - only if the holder is a Resztvevo (ErrNotResztvevo).
-func requireClaimAllowed(ctx context.Context, q store.Queries, e domain.Esemeny, actorID string, holder domain.ClaimHolder) error {
+//   - for themselves; or, with allowSzervezo, for anyone when the actor is
+//     the Szervezo (moving people between Autok or Agyak, #17 and #18);
+//     anyone else gets ErrNotPermitted;
+//   - for a name-only Vendeg (#13), whose Tag claims for them; #13 checks
+//     the Vendeg and their Tag here, and until then a Vendeg is
+//     ErrNotFound;
+//   - only if the holder is a Resztvevo (ErrNotResztvevo), whoever acts.
+func requireClaimAllowedBy(ctx context.Context, q store.Queries, e domain.Esemeny, actorID string, holder domain.ClaimHolder, allowSzervezo bool) error {
 	if e.Allapot != domain.Veglegesitve {
 		return ErrClaimingClosed
 	}
 	if holder.VendegID != "" {
 		return fmt.Errorf("%w: no such vendeg", ErrNotFound)
 	}
-	if holder.FelhasznaloID != actorID {
+	bySzervezo := allowSzervezo && actorID == e.SzervezoID
+	if holder.FelhasznaloID != actorID && !bySzervezo {
 		return ErrNotPermitted
 	}
 	ok, err := isResztvevo(ctx, q, e, holder)
@@ -307,7 +410,7 @@ func requireClaimAllowed(ctx context.Context, q store.Queries, e domain.Esemeny,
 	return nil
 }
 
-// canClaim is requireClaimAllowed as a yes or no, for views.
+// canClaim is requireClaimAllowed for oneself as a yes or no, for views.
 func canClaim(ctx context.Context, q store.Queries, e domain.Esemeny, felhasznaloID string) (bool, error) {
 	err := requireClaimAllowed(ctx, q, e, felhasznaloID, domain.ClaimHolder{FelhasznaloID: felhasznaloID})
 	switch {
@@ -335,10 +438,10 @@ func isResztvevo(ctx context.Context, q store.Queries, e domain.Esemeny, holder 
 }
 
 // releaseClaims runs every Kiegeszito's releaser in the transaction for the
-// holders release picks. It returns what was freed in the Kiegeszitok that
-// are on (a hidden one isn't worth mentioning) and the work the releasers
-// queued for after the commit.
-func (a *App) releaseClaims(ctx context.Context, q store.Queries, e domain.Esemeny, release func(domain.ClaimHolder) bool) ([]string, []func(context.Context), error) {
+// holders release picks, each with t.enabled set to whether that one is on.
+// It returns what was freed in the Kiegeszitok that are on (a hidden one
+// isn't worth mentioning) and the jobs the releasers queued.
+func (a *App) releaseClaims(ctx context.Context, q store.Queries, e domain.Esemeny, release func(domain.ClaimHolder) bool) ([]string, []kiegeszitoJob, error) {
 	enabled, err := q.EnabledKiegeszitok(ctx, e.ID)
 	if err != nil {
 		return nil, nil, err
@@ -349,11 +452,12 @@ func (a *App) releaseClaims(ctx context.Context, q store.Queries, e domain.Eseme
 		if k.releaseClaims == nil {
 			continue
 		}
+		t.enabled = enabled[k.kind]
 		f, err := k.releaseClaims(ctx, t, release)
 		if err != nil {
 			return nil, nil, fmt.Errorf("release %s claims: %w", k.kind, err)
 		}
-		if enabled[k.kind] {
+		if t.enabled {
 			freed = append(freed, f...)
 		}
 	}
@@ -361,8 +465,8 @@ func (a *App) releaseClaims(ctx context.Context, q store.Queries, e domain.Eseme
 }
 
 // releaseDropOut releases every claim of a Felhasznalo who dropped from
-// igen (see SetVisszajelzes).
-func (a *App) releaseDropOut(ctx context.Context, q store.Queries, e domain.Esemeny, felhasznaloID string) ([]string, []func(context.Context), error) {
+// igen (SetVisszajelzes) or stopped being a Tag (deleteTag).
+func (a *App) releaseDropOut(ctx context.Context, q store.Queries, e domain.Esemeny, felhasznaloID string) ([]string, []kiegeszitoJob, error) {
 	holder := domain.ClaimHolder{FelhasznaloID: felhasznaloID}
 	return a.releaseClaims(ctx, q, e, func(h domain.ClaimHolder) bool { return h == holder })
 }
@@ -370,7 +474,7 @@ func (a *App) releaseDropOut(ctx context.Context, q store.Queries, e domain.Esem
 // releaseNonResztvevok drops the claims of everyone who isn't a Resztvevo
 // of the Esemeny as confirmed (see ConfirmIdopont). e must already be
 // Veglegesitve with its new confirmed Idopont.
-func (a *App) releaseNonResztvevok(ctx context.Context, q store.Queries, e domain.Esemeny) ([]func(context.Context), error) {
+func (a *App) releaseNonResztvevok(ctx context.Context, q store.Queries, e domain.Esemeny) ([]kiegeszitoJob, error) {
 	vs, err := q.ListVisszajelzesekOfEsemeny(ctx, e.ID)
 	if err != nil {
 		return nil, err
@@ -379,6 +483,8 @@ func (a *App) releaseNonResztvevok(ctx context.Context, q store.Queries, e domai
 	for _, r := range resztvevokOf(e, vs) {
 		stays[domain.HolderOf(r)] = true
 	}
+	// What was freed is thrown away: a re-confirmation is the Szervezo's
+	// own act, announced as such, and sends no drop-out DM.
 	_, after, err := a.releaseClaims(ctx, q, e, func(h domain.ClaimHolder) bool { return !stays[h] })
 	return after, err
 }
@@ -390,7 +496,7 @@ func (a *App) kiegeszitoSummary(ctx context.Context, q store.Queries, e domain.E
 	if err != nil {
 		return "", err
 	}
-	t := &kiegeszitoTx{a: a, q: q, e: e}
+	t := &kiegeszitoTx{a: a, q: q, e: e, enabled: true}
 	var parts []string
 	for _, k := range a.registered() {
 		if !enabled[k.kind] || k.summary == nil {

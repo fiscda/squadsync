@@ -156,11 +156,11 @@ func (s *server) setVallalas(w http.ResponseWriter, r *http.Request, felhasznalo
 func (s *server) writeFelszerelesError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, app.ErrTetelMindenkiHozza):
-		writeCodedError(w, http.StatusConflict, err, "mindenki_hozza")
+		writeCodedError(w, http.StatusConflict, err, "felszereles_mindenki_hozza")
 	case errors.Is(err, app.ErrVallalasTooMuch):
-		writeCodedError(w, http.StatusConflict, err, "too_much")
+		writeCodedError(w, http.StatusConflict, err, "felszereles_too_much")
 	case errors.Is(err, app.ErrTetelClaimed):
-		writeCodedError(w, http.StatusConflict, err, "tetel_claimed")
+		writeCodedError(w, http.StatusConflict, err, "felszereles_tetel_claimed")
 	default:
 		s.writeKiegeszitoError(w, r, err)
 	}

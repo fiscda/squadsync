@@ -37,7 +37,7 @@ const (
 // reopen Egyeztetes first).
 func (a *App) ConfirmIdopont(ctx context.Context, felhasznaloID, esemenyID, idopontID string) error {
 	var ann gateway.Announcement
-	var released []func(context.Context)
+	var released []kiegeszitoJob
 	err := a.store.InTx(ctx, func(q store.Queries) error {
 		e, err := requireSzervezo(ctx, q, esemenyID, felhasznaloID)
 		if err != nil {
@@ -70,9 +70,7 @@ func (a *App) ConfirmIdopont(ctx context.Context, felhasznaloID, esemenyID, idop
 		return err
 	}
 	a.afterCommit(func(ctx context.Context) {
-		for _, job := range released {
-			job(ctx)
-		}
+		a.runKiegeszitoJobs(ctx, released)
 		a.announceAllapot(ctx, esemenyID, felhasznaloID, ann)
 	})
 	return nil
