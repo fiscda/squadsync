@@ -136,14 +136,14 @@ func (a *App) DiscordAccounts(ctx context.Context, felhasznaloID string) ([]doma
 // application (README.md).
 const LinkCallbackPath = "/fiok/discord/callback"
 
-// LinkRedirectURI is the redirect URI of the linking flow: the public URL of
-// the web app plus LinkCallbackPath. Go owns it, so a caller can't make Go
+// LinkRedirectURI is the redirect URI of the linking flow: the web app's
+// public URL (Deps.WebURL, from BETTER_AUTH_URL) plus LinkCallbackPath. Go owns it, so a caller can't make Go
 // exchange a code for another redirect URI. It fails with
 // gateway.ErrNotConfigured when the public URL isn't set.
 func (a *App) LinkRedirectURI() (string, error) {
-	base := strings.TrimRight(strings.TrimSpace(a.publicURL), "/")
+	base := strings.TrimRight(strings.TrimSpace(a.webURL), "/")
 	if base == "" {
-		return "", fmt.Errorf("public url for the link redirect: %w", gateway.ErrNotConfigured)
+		return "", fmt.Errorf("web url for the link redirect: %w", gateway.ErrNotConfigured)
 	}
 	return base + LinkCallbackPath, nil
 }

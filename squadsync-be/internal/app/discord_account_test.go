@@ -11,8 +11,8 @@ import (
 	"squadsync-be/internal/gateway"
 )
 
-// redirectURI is what Go builds from the harness's public URL.
-const redirectURI = apptest.PublicURL + "/fiok/discord/callback"
+// redirectURI is what Go builds from the harness's web URL.
+const redirectURI = apptest.WebURL + "/fiok/discord/callback"
 
 // firstLogin logs a new Felhasznalo in to the web with their main account.
 func firstLogin(t *testing.T, h *apptest.Harness, id, discordID, name string) {
@@ -287,7 +287,7 @@ func TestWebLoginIsRefusedForALinkedAccount(t *testing.T) {
 	}
 }
 
-func TestLinkingIsUnavailableWithoutAPublicURL(t *testing.T) {
+func TestLinkingIsUnavailableWithoutAWebURL(t *testing.T) {
 	h := apptest.New(t)
 	firstLogin(t, h, "anna", "d-anna", "Anna")
 	a := app.New(app.Deps{Store: h.Store, Clock: h.Clock, Discord: h.Discord, DiscordOAuth: h.DiscordOAuth})
@@ -298,5 +298,22 @@ func TestLinkingIsUnavailableWithoutAPublicURL(t *testing.T) {
 	}
 	if len(h.DiscordOAuth.Exchanges()) != 0 {
 		t.Fatalf("Discord was asked anyway: %+v", h.DiscordOAuth.Exchanges())
+	}
+}
+
+func TestDMsReachEveryLinkedDiscordAccount(t *testing.T) {
+	h := apptest.New(t)
+	c := csoportOf(t, h, "bela") // no Csatorna: the announcement goes by DM
+	if _, err := link(h, "bela", "discord-bela-phone", "Béla telefon"); err != nil {
+		t.Fatalf("Béla links his phone: %v", err)
+	}
+
+	e := propose(t, h, "anna", c.ID, 2)
+
+	for _, discordID := range []string{"discord-bela", "discord-bela-phone"} {
+		dms := h.Discord.DMsTo(discordID)
+		if len(dms) != 1 || dms[0].Esemeny == nil || dms[0].Esemeny.EsemenyID != e.ID {
+			t.Fatalf("DMs to %s = %+v, want the one announcement of %s", discordID, dms, e.ID)
+		}
 	}
 }

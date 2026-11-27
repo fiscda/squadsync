@@ -14,26 +14,113 @@ import (
 // DM is one direct message sent through the fake Discord.
 type DM struct {
 	DiscordID string
-	Content   string
+	// Content is a plain DM's text.
+	Content string
+	// VoteRequest is set for a vote request, alone or above an Esemeny.
+	VoteRequest *gateway.VoteRequest
+	// Esemeny is the Esemeny message sent, nil if none.
+	Esemeny *gateway.EsemenyMessage
+	// Ref is the sent message, set only when Esemeny is.
+	Ref gateway.MessageRef
 }
 
-// Discord records direct messages instead of sending them.
+// Post is one Esemeny message posted in a channel.
+type Post struct {
+	Ref     gateway.MessageRef
+	Message gateway.EsemenyMessage
+}
+
+// Edit is one edit of a posted Esemeny message.
+type Edit struct {
+	Ref     gateway.MessageRef
+	Message gateway.EsemenyMessage
+}
+
+// Discord records messages instead of sending them. Messages get
+// predictable ids: "msg-1", "msg-2", ...; a DM's channel id is "dm-" and the
+// Discord id.
 type Discord struct {
-	mu  sync.Mutex
-	dms []DM
+	mu    sync.Mutex
+	fail  error
+	next  int
+	dms   []DM
+	posts []Post
+	edits []Edit
 }
 
 var _ gateway.DiscordMessenger = (*Discord)(nil)
+
+// Fail makes every later call fail with err, as when Discord is down. Calls
+// that fail aren't recorded. Fail(nil) makes calls succeed again.
+func (d *Discord) Fail(err error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.fail = err
+}
+
+func (d *Discord) newRef(channelID string) gateway.MessageRef {
+	d.next++
+	return gateway.MessageRef{ChannelID: channelID, MessageID: fmt.Sprintf("msg-%d", d.next)}
+}
 
 // SendDM records the message.
 func (d *Discord) SendDM(_ context.Context, discordID string, content string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.fail != nil {
+		return d.fail
+	}
 	d.dms = append(d.dms, DM{DiscordID: discordID, Content: content})
 	return nil
 }
 
-// DMs returns every message sent so far, in order.
+// SendVoteRequestDM records the message.
+func (d *Discord) SendVoteRequestDM(_ context.Context, discordID string, r gateway.VoteRequest) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.fail != nil {
+		return d.fail
+	}
+	d.dms = append(d.dms, DM{DiscordID: discordID, VoteRequest: &r})
+	return nil
+}
+
+// SendEsemenyDM records the message.
+func (d *Discord) SendEsemenyDM(_ context.Context, discordID string, r gateway.VoteRequest, m gateway.EsemenyMessage) (gateway.MessageRef, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.fail != nil {
+		return gateway.MessageRef{}, d.fail
+	}
+	ref := d.newRef("dm-" + discordID)
+	d.dms = append(d.dms, DM{DiscordID: discordID, VoteRequest: &r, Esemeny: &m, Ref: ref})
+	return ref, nil
+}
+
+// PostEsemenyMessage records the post.
+func (d *Discord) PostEsemenyMessage(_ context.Context, channelID string, m gateway.EsemenyMessage) (gateway.MessageRef, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.fail != nil {
+		return gateway.MessageRef{}, d.fail
+	}
+	ref := d.newRef(channelID)
+	d.posts = append(d.posts, Post{Ref: ref, Message: m})
+	return ref, nil
+}
+
+// EditEsemenyMessage records the edit.
+func (d *Discord) EditEsemenyMessage(_ context.Context, ref gateway.MessageRef, m gateway.EsemenyMessage) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.fail != nil {
+		return d.fail
+	}
+	d.edits = append(d.edits, Edit{Ref: ref, Message: m})
+	return nil
+}
+
+// DMs returns every direct message sent so far, in order.
 func (d *Discord) DMs() []DM {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -49,6 +136,20 @@ func (d *Discord) DMsTo(discordID string) []DM {
 		}
 	}
 	return out
+}
+
+// Posts returns every Esemeny message posted in a channel, in order.
+func (d *Discord) Posts() []Post {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]Post(nil), d.posts...)
+}
+
+// Edits returns every edit of a posted message, in order.
+func (d *Discord) Edits() []Edit {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]Edit(nil), d.edits...)
 }
 
 // CalendarUpsert is one recorded GoogleCalendar.UpsertEvent call.

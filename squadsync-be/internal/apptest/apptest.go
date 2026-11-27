@@ -21,11 +21,11 @@ import (
 	"squadsync-be/internal/store"
 )
 
-// PublicURL is the web app's public URL the harness configures.
-const PublicURL = "https://squadsync.example"
-
 // Start is where the fake clock starts: a fixed, ordinary moment in UTC.
 var Start = time.Date(2026, time.March, 2, 9, 0, 0, 0, time.UTC)
+
+// WebURL is the web app's public URL the core is given.
+const WebURL = "https://squadsync.example"
 
 // Harness is one isolated application core and its controllable outside world.
 type Harness struct {
@@ -56,14 +56,13 @@ func New(t testing.TB) *Harness {
 		DiscordOAuth: &gatewayfake.DiscordOAuth{},
 	}
 	h.App = app.New(app.Deps{
-		Store:    h.Store,
-		Clock:    h.Clock,
-		Discord:  h.Discord,
-		Calendar: h.Calendar,
-		Spotify:  h.Spotify,
-
+		Store:        h.Store,
+		Clock:        h.Clock,
+		Discord:      h.Discord,
+		Calendar:     h.Calendar,
+		Spotify:      h.Spotify,
 		DiscordOAuth: h.DiscordOAuth,
-		PublicURL:    PublicURL,
+		WebURL:       WebURL,
 	})
 	return h
 }

@@ -49,7 +49,7 @@ func TestLinkListAndUnlinkDiscordAccountsOverHTTP(t *testing.T) {
 
 	got := decode[linkResp](t, call(t, api, http.MethodPost, "/felhasznalo/discord-account", linkRequest("phone"), as("anna")))
 	// Go used its own redirect URI, not one from the request.
-	if ex := h.DiscordOAuth.Exchanges(); len(ex) != 1 || ex[0].RedirectURI != apptest.PublicURL+"/fiok/discord/callback" {
+	if ex := h.DiscordOAuth.Exchanges(); len(ex) != 1 || ex[0].RedirectURI != apptest.WebURL+"/fiok/discord/callback" {
 		t.Fatalf("exchanges = %+v, want one with Go's redirect URI", ex)
 	}
 	if got.Account.DiscordID != "d-anna-phone" || got.Account.Main || got.AlreadyLinked || got.RemovedFelhasznaloID != "" {
