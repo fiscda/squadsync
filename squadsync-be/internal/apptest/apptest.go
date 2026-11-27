@@ -24,6 +24,9 @@ import (
 // Start is where the fake clock starts: a fixed, ordinary moment in UTC.
 var Start = time.Date(2026, time.March, 2, 9, 0, 0, 0, time.UTC)
 
+// WebURL is the web app's public URL the core is given.
+const WebURL = "https://squadsync.example"
+
 // Harness is one isolated application core and its controllable outside world.
 type Harness struct {
 	App      *app.App
@@ -54,6 +57,7 @@ func New(t testing.TB) *Harness {
 		Discord:  h.Discord,
 		Calendar: h.Calendar,
 		Spotify:  h.Spotify,
+		WebURL:   WebURL,
 	})
 	return h
 }

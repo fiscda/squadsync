@@ -14,7 +14,10 @@ import (
 	"squadsync-be/internal/store"
 )
 
-// Limits on what an Esemeny holds.
+// Limits on what an Esemeny holds. They also keep its Discord message
+// within Discord's 6000-character total for an embed: a 100-character title,
+// a 2000-character description, a 200-character Helyszin and 20 Idopont
+// fields of about 100 characters each stay well under it.
 const (
 	MaxEsemenyTitleLength       = 100
 	MaxEsemenyDescriptionLength = 2000
@@ -116,6 +119,7 @@ func (a *App) ProposeEsemeny(ctx context.Context, felhasznaloID, csoportID strin
 	if err != nil {
 		return domain.Esemeny{}, err
 	}
+	a.afterCommit(func(ctx context.Context) { a.announceEsemeny(ctx, e.ID) })
 	return e, nil
 }
 
@@ -283,6 +287,12 @@ func (a *App) Esemeny(ctx context.Context, felhasznaloID, esemenyID string) (Ese
 	if err != nil {
 		return EsemenyDetail{}, err
 	}
+	return esemenyDetail(ctx, q, e, felhasznaloID)
+}
+
+// esemenyDetail reads what the Esemeny's page shows to viewerID ("" for
+// nobody in particular).
+func esemenyDetail(ctx context.Context, q store.Queries, e domain.Esemeny, viewerID string) (EsemenyDetail, error) {
 	csoport, err := q.FindCsoport(ctx, e.CsoportID)
 	if err != nil {
 		return EsemenyDetail{}, err
@@ -303,7 +313,7 @@ func (a *App) Esemeny(ctx context.Context, felhasznaloID, esemenyID string) (Ese
 		Esemeny:      e,
 		CsoportName:  csoport.Name,
 		SzervezoName: szervezo.Name,
-		Idopontok:    idopontAllasok(idopontok, visszajelzesek, felhasznaloID),
+		Idopontok:    idopontAllasok(idopontok, visszajelzesek, viewerID),
 	}, nil
 }
 
@@ -359,7 +369,7 @@ func (a *App) SetVisszajelzes(ctx context.Context, felhasznaloID, esemenyID, ido
 	if !valasz.Valid() {
 		return fmt.Errorf("%w: a visszajelzes is igen, talan or nem", ErrInvalidInput)
 	}
-	return a.store.InTx(ctx, func(q store.Queries) error {
+	err := a.store.InTx(ctx, func(q store.Queries) error {
 		e, err := requireEsemenyTag(ctx, q, esemenyID, felhasznaloID)
 		if err != nil {
 			return err
@@ -371,7 +381,7 @@ func (a *App) SetVisszajelzes(ctx context.Context, felhasznaloID, esemenyID, ido
 		if i.EsemenyID != e.ID {
 			return ErrNotFound
 		}
-		if e.Allapot != domain.Egyeztetes {
+		if !answerable(e, i) {
 			return ErrIdopontNotAnswerable
 		}
 		return q.UpsertVisszajelzes(ctx, domain.Visszajelzes{
@@ -381,6 +391,19 @@ func (a *App) SetVisszajelzes(ctx context.Context, felhasznaloID, esemenyID, ido
 			UpdatedAt:     a.clock.Now(),
 		})
 	})
+	if err != nil {
+		return err
+	}
+	a.afterCommit(func(ctx context.Context) { a.refreshEsemenyMessages(ctx, esemenyID) })
+	return nil
+}
+
+// answerable tells whether the Idopont of the Esemeny takes Visszajelzesek
+// now. It is the one seam for this rule: SetVisszajelzes refuses the others,
+// and the Discord message shows answer buttons on exactly these. #8 changes
+// it so that after confirmation only the confirmed Idopont is answerable.
+func answerable(e domain.Esemeny, _ domain.Idopont) bool {
+	return e.Allapot == domain.Egyeztetes
 }
 
 // requireEsemenyTag returns the Esemeny if the Felhasznalo is a Tag of its

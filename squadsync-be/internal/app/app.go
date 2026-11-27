@@ -9,6 +9,7 @@ package app
 
 import (
 	"errors"
+	"log/slog"
 
 	"squadsync-be/internal/clock"
 	"squadsync-be/internal/gateway"
@@ -32,6 +33,18 @@ type Deps struct {
 	Discord  gateway.DiscordMessenger
 	Calendar gateway.GoogleCalendar
 	Spotify  gateway.Spotify
+
+	// WebURL is the public URL of the web app, for links in Discord
+	// messages.
+	WebURL string
+	// Log receives failures that don't fail a use case, such as Discord
+	// being down. Optional.
+	Log *slog.Logger
+	// AsyncDiscord sends Discord messages from a background worker after a
+	// use case returns, instead of before. The server sets it, so a slow
+	// Discord never slows down the web or the bot, and calls WaitDiscord
+	// when shutting down. Tests leave it off. See afterCommit.
+	AsyncDiscord bool
 }
 
 // App runs the use cases.
@@ -41,15 +54,27 @@ type App struct {
 	discord  gateway.DiscordMessenger
 	calendar gateway.GoogleCalendar
 	spotify  gateway.Spotify
+
+	webURL string
+	log    *slog.Logger
+	// work runs Discord work after commits (see afterCommit).
+	work *discordWork
 }
 
 // New builds the application core.
 func New(d Deps) *App {
-	return &App{
+	a := &App{
 		store:    d.Store,
 		clock:    d.Clock,
 		discord:  d.Discord,
 		calendar: d.Calendar,
 		spotify:  d.Spotify,
+		webURL:   d.WebURL,
+		log:      d.Log,
 	}
+	if a.log == nil {
+		a.log = slog.New(slog.DiscardHandler)
+	}
+	a.work = newDiscordWork(d.AsyncDiscord, a.log)
+	return a
 }

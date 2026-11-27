@@ -19,6 +19,78 @@ var ErrNotConfigured = errors.New("gateway: not configured")
 type DiscordMessenger interface {
 	// SendDM sends a direct message to one Discord account.
 	SendDM(ctx context.Context, discordID string, content string) error
+	// PostEsemenyMessage posts an Esemeny's message in a channel.
+	PostEsemenyMessage(ctx context.Context, channelID string, m EsemenyMessage) (MessageRef, error)
+	// SendVoteRequestDM asks one Discord account, by direct message, to
+	// answer a new Esemeny.
+	SendVoteRequestDM(ctx context.Context, discordID string, r VoteRequest) error
+	// SendEsemenyDM sends an Esemeny's message to one Discord account by
+	// direct message, with the vote request as text above it.
+	SendEsemenyDM(ctx context.Context, discordID string, r VoteRequest, m EsemenyMessage) (MessageRef, error)
+	// EditEsemenyMessage replaces an Esemeny's message posted earlier
+	// (in a channel or a DM) with m, in place and without notifying anyone.
+	EditEsemenyMessage(ctx context.Context, ref MessageRef, m EsemenyMessage) error
+}
+
+// VoteRequest asks a Tag to answer a new Esemeny. Its fields are plain
+// text; the bot words and escapes them.
+type VoteRequest struct {
+	CsoportName string
+	Title       string
+	// ChannelMessageURL links to the Esemeny's post in the Csatorna, "" for
+	// none.
+	ChannelMessageURL string
+	// WebURL links to the Esemeny's page on the web, "" for none.
+	WebURL string
+}
+
+// MessageRef identifies one message the bot posted.
+type MessageRef struct {
+	ChannelID string
+	MessageID string
+}
+
+// EsemenyMessage is what an Esemeny's Discord message says. The application
+// core decides its content; the bot only lays it out (embed, buttons) and
+// escapes the plain-text fields for Discord's markdown.
+type EsemenyMessage struct {
+	EsemenyID string
+	Title     string
+	// URL is the Esemeny's page on the web, set only when Discord accepts
+	// it as a link (not for localhost); then the Note shows it instead.
+	URL         string
+	Description string
+	CsoportName string
+	// Allapot is the Esemeny's state, as shown (e.g. "Egyeztetés").
+	Allapot      string
+	SzervezoName string
+	// HelyszinName and HelyszinURL (a Maps link) are both optional.
+	HelyszinName string
+	HelyszinURL  string
+	// Idopontok are in chronological order. At most MaxAnswerRows of them
+	// are Answerable.
+	Idopontok []IdopontLine
+	// Note is an extra line under the Idopontok, "" for none.
+	Note string
+	// WebButton asks for a link button to URL, for when the answer buttons
+	// don't fit. It is never set without URL.
+	WebButton bool
+}
+
+// MaxAnswerRows is how many Idopontok can have answer buttons: Discord
+// allows 5 rows of components on a message.
+const MaxAnswerRows = 5
+
+// IdopontLine is one Idopont in an EsemenyMessage.
+type IdopontLine struct {
+	ID string
+	// Label is its Budapest time, ready to show.
+	Label            string
+	Igen, Talan, Nem int
+	// Helyezes is 0 when nobody has answered it.
+	Helyezes int
+	// Answerable asks for igen/talán/nem buttons on it.
+	Answerable bool
 }
 
 // CalendarEvent is one event in a Felhasznalo's dedicated "Squad Sync"
@@ -55,6 +127,26 @@ type Disabled struct{}
 
 // SendDM implements DiscordMessenger.
 func (Disabled) SendDM(context.Context, string, string) error { return ErrNotConfigured }
+
+// PostEsemenyMessage implements DiscordMessenger.
+func (Disabled) PostEsemenyMessage(context.Context, string, EsemenyMessage) (MessageRef, error) {
+	return MessageRef{}, ErrNotConfigured
+}
+
+// SendVoteRequestDM implements DiscordMessenger.
+func (Disabled) SendVoteRequestDM(context.Context, string, VoteRequest) error {
+	return ErrNotConfigured
+}
+
+// SendEsemenyDM implements DiscordMessenger.
+func (Disabled) SendEsemenyDM(context.Context, string, VoteRequest, EsemenyMessage) (MessageRef, error) {
+	return MessageRef{}, ErrNotConfigured
+}
+
+// EditEsemenyMessage implements DiscordMessenger.
+func (Disabled) EditEsemenyMessage(context.Context, MessageRef, EsemenyMessage) error {
+	return ErrNotConfigured
+}
 
 // UpsertEvent implements GoogleCalendar.
 func (Disabled) UpsertEvent(context.Context, string, CalendarEvent) error {
