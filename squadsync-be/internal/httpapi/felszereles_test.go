@@ -40,7 +40,7 @@ func TestSwitchingKiegeszitokOverHTTP(t *testing.T) {
 	path := "/esemeny/" + esemenyID + "/kiegeszito/felszereles"
 
 	d := decode[kiegeszitokResp](t, call(t, api, http.MethodGet, "/esemeny/"+esemenyID, "", as("bela")))
-	if len(d.Kiegeszitok) != 1 || d.Kiegeszitok[0].Kind != "felszereles" || d.Kiegeszitok[0].Enabled || !d.Kiegeszitok[0].Switchable {
+	if len(d.Kiegeszitok) != 2 || d.Kiegeszitok[0].Kind != "koltsegek" || d.Kiegeszitok[1].Kind != "felszereles" || d.Kiegeszitok[1].Enabled || !d.Kiegeszitok[1].Switchable {
 		t.Fatalf("kiegeszitok = %+v, want Felszereles off and switchable", d.Kiegeszitok)
 	}
 	expectStatus(t, call(t, api, http.MethodGet, "/esemeny/"+esemenyID+"/felszereles", "", as("bela")), http.StatusConflict)
@@ -52,7 +52,7 @@ func TestSwitchingKiegeszitokOverHTTP(t *testing.T) {
 	expectStatus(t, call(t, api, http.MethodPut, path, `{"enabled":true}`, as("anna")), http.StatusNoContent)
 
 	d = decode[kiegeszitokResp](t, call(t, api, http.MethodGet, "/esemeny/"+esemenyID, "", as("bela")))
-	if !d.Kiegeszitok[0].Enabled {
+	if !d.Kiegeszitok[1].Enabled {
 		t.Fatalf("kiegeszitok = %+v, want Felszereles on", d.Kiegeszitok)
 	}
 
