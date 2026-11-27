@@ -1,0 +1,190 @@
+package httpapi
+
+import (
+	"errors"
+	"net/http"
+	"time"
+
+	"squadsync-be/internal/app"
+	"squadsync-be/internal/domain"
+)
+
+func (s *server) registerCsoport(mux *http.ServeMux) {
+	mux.HandleFunc("POST /csoport", withFelhasznalo(s.createCsoport))
+	mux.HandleFunc("GET /csoport", withFelhasznalo(s.listCsoportok))
+	mux.HandleFunc("GET /csoport/{id}", withFelhasznalo(s.getCsoport))
+	mux.HandleFunc("POST /csoport/{id}/meghivo", withFelhasznalo(s.createCsoportMeghivo))
+	mux.HandleFunc("GET /csoport/{id}/meghivo", withFelhasznalo(s.listCsoportMeghivok))
+	mux.HandleFunc("DELETE /csoport/{id}/meghivo/{meghivoID}", withFelhasznalo(s.revokeCsoportMeghivo))
+
+	// Opening a link comes first and needs no Felhasznalo: the join page
+	// shows which Csoport the link is for before the visitor has logged in.
+	mux.HandleFunc("GET /csoport-meghivo/{token}", s.previewCsoportMeghivo)
+	mux.HandleFunc("GET /csoport-meghivo/{token}/tag", withFelhasznalo(s.tagOfCsoportMeghivo))
+	mux.HandleFunc("POST /csoport-meghivo/{token}/join", withFelhasznalo(s.joinCsoport))
+}
+
+// The wire forms below are kept in sync by hand with the types in
+// squadsync-fe/src/lib/backend.ts.
+
+type csoportJSON struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+type csoportSummaryJSON struct {
+	csoportJSON
+	Admin    bool `json:"admin"`
+	TagCount int  `json:"tagCount"`
+}
+
+type tagJSON struct {
+	FelhasznaloID string    `json:"felhasznaloId"`
+	Name          string    `json:"name"`
+	Admin         bool      `json:"admin"`
+	CreatedAt     time.Time `json:"createdAt"`
+}
+
+type csoportDetailJSON struct {
+	csoportJSON
+	// Admin tells whether the caller is an Admin of the Csoport.
+	Admin bool      `json:"admin"`
+	Tags  []tagJSON `json:"tags"`
+}
+
+type csoportMeghivoJSON struct {
+	ID        string    `json:"id"`
+	Token     string    `json:"token"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+// meghivoPreviewJSON is all that the holder of a link may learn before
+// joining: the name of the Csoport.
+type meghivoPreviewJSON struct {
+	Name string `json:"name"`
+}
+
+func toCsoportJSON(c domain.Csoport) csoportJSON {
+	return csoportJSON{ID: c.ID, Name: c.Name, CreatedAt: c.CreatedAt}
+}
+
+func toCsoportMeghivoJSON(m domain.CsoportMeghivo) csoportMeghivoJSON {
+	return csoportMeghivoJSON{ID: m.ID, Token: m.Token, CreatedAt: m.CreatedAt}
+}
+
+func (s *server) createCsoport(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
+	var body struct {
+		Name string `json:"name"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	c, err := s.app.CreateCsoport(r.Context(), felhasznaloID, body.Name)
+	if err != nil {
+		s.writeCsoportError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, toCsoportJSON(c))
+}
+
+func (s *server) listCsoportok(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
+	list, err := s.app.CsoportokOf(r.Context(), felhasznaloID)
+	if err != nil {
+		s.writeCsoportError(w, r, err)
+		return
+	}
+	out := make([]csoportSummaryJSON, 0, len(list))
+	for _, c := range list {
+		out = append(out, csoportSummaryJSON{csoportJSON: toCsoportJSON(c.Csoport), Admin: c.Admin, TagCount: c.TagCount})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *server) getCsoport(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
+	d, err := s.app.Csoport(r.Context(), felhasznaloID, r.PathValue("id"))
+	if err != nil {
+		s.writeCsoportError(w, r, err)
+		return
+	}
+	tags := make([]tagJSON, 0, len(d.Tags))
+	for _, t := range d.Tags {
+		tags = append(tags, tagJSON{FelhasznaloID: t.FelhasznaloID, Name: t.FelhasznaloName, Admin: t.Admin, CreatedAt: t.CreatedAt})
+	}
+	writeJSON(w, http.StatusOK, csoportDetailJSON{csoportJSON: toCsoportJSON(d.Csoport), Admin: d.Admin, Tags: tags})
+}
+
+func (s *server) createCsoportMeghivo(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
+	m, err := s.app.CreateCsoportMeghivo(r.Context(), felhasznaloID, r.PathValue("id"))
+	if err != nil {
+		s.writeCsoportError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, toCsoportMeghivoJSON(m))
+}
+
+func (s *server) listCsoportMeghivok(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
+	list, err := s.app.CsoportMeghivok(r.Context(), felhasznaloID, r.PathValue("id"))
+	if err != nil {
+		s.writeCsoportError(w, r, err)
+		return
+	}
+	out := make([]csoportMeghivoJSON, 0, len(list))
+	for _, m := range list {
+		out = append(out, toCsoportMeghivoJSON(m))
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *server) revokeCsoportMeghivo(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
+	err := s.app.RevokeCsoportMeghivo(r.Context(), felhasznaloID, r.PathValue("id"), r.PathValue("meghivoID"))
+	if err != nil {
+		s.writeCsoportError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *server) previewCsoportMeghivo(w http.ResponseWriter, r *http.Request) {
+	c, err := s.app.CsoportMeghivoPreview(r.Context(), r.PathValue("token"))
+	if err != nil {
+		s.writeCsoportError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, meghivoPreviewJSON{Name: c.Name})
+}
+
+func (s *server) tagOfCsoportMeghivo(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
+	id, err := s.app.TagCsoportOfMeghivo(r.Context(), felhasznaloID, r.PathValue("token"))
+	if err != nil {
+		s.writeCsoportError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		CsoportID string `json:"csoportId"`
+	}{id})
+}
+
+func (s *server) joinCsoport(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
+	res, err := s.app.JoinCsoport(r.Context(), felhasznaloID, r.PathValue("token"))
+	if err != nil {
+		s.writeCsoportError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		csoportJSON
+		Joined bool `json:"joined"`
+	}{toCsoportJSON(res.Csoport), res.Joined})
+}
+
+func (s *server) writeCsoportError(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, app.ErrCsoportMeghivoRevoked) {
+		writeError(w, http.StatusGone, err.Error())
+		return
+	}
+	if errors.Is(err, app.ErrFelhasznaloUnknown) {
+		writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
+	s.writeAppError(w, r, err)
+}

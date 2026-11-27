@@ -39,6 +39,7 @@ func New(a *app.App, secret string, log *slog.Logger) http.Handler {
 
 	mux := http.NewServeMux()
 	s.registerFelhasznalo(mux)
+	s.registerCsoport(mux)
 
 	return requireSecret(secret, mux)
 }
