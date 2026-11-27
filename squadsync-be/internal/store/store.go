@@ -23,8 +23,10 @@ var ErrNotFound = errors.New("store: not found")
 // to release its lock before giving up with SQLITE_BUSY.
 const busyTimeout = 5 * time.Second
 
-// timeFormat is how times are stored: RFC 3339 in UTC.
-const timeFormat = time.RFC3339Nano
+// timeFormat is how times are stored: RFC 3339 in UTC with always nine
+// fractional digits, so stored times have a fixed width and sort correctly
+// as text (ORDER BY, MIN, comparisons in SQL).
+const timeFormat = "2006-01-02T15:04:05.000000000Z07:00"
 
 // Store gives access to the Go-owned tables. Its embedded Queries run outside
 // a transaction; use InTx to group writes.
@@ -95,7 +97,8 @@ func isNoRows(err error) bool { return errors.Is(err, sql.ErrNoRows) }
 func formatTime(t time.Time) string { return t.UTC().Format(timeFormat) }
 
 func parseTime(s string) (time.Time, error) {
-	t, err := time.Parse(timeFormat, s)
+	// RFC3339Nano also reads rows written before the fixed-width format.
+	t, err := time.Parse(time.RFC3339Nano, s)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("parse stored time %q: %w", s, err)
 	}

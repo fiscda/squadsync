@@ -16,6 +16,7 @@ import {
   unlinkCsatornaAction,
 } from "../actions";
 import { CopyLink } from "./copy-link";
+import { EsemenySection } from "./esemeny-section";
 
 export default function CsoportPage({ params }: PageProps<"/csoportok/[id]">) {
   return (
@@ -50,6 +51,8 @@ async function Csoport({ csoportId }: { csoportId: string }) {
           Létrehozva: {formatDate(csoport.createdAt)}
         </p>
       </div>
+
+      <EsemenySection csoportId={csoport.id} />
 
       <section className="flex flex-col gap-3">
         <h2 className="text-xl font-semibold">Tagok ({csoport.tags.length})</h2>
