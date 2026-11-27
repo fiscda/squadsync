@@ -7,19 +7,23 @@
     "build": "next build",
     "start": "next start",
     "lint": "biome check",
-    "format": "biome format --write"
+    "format": "biome format --write",
+    "auth:migrate": "auth migrate --config src/lib/auth.ts --yes"
   },
   "dependencies": {
+    "better-auth": "1.7.28",
     "next": "16.4.6",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "server-only": "0.0.1"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.2",
     "@tailwindcss/turbopack": "4.3.3",
-    "@types/node": "^20",
+    "@types/node": "^24",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "auth": "1.7.28",
     "tailwindcss": "4.3.3",
     "typescript": "^5"
   },
