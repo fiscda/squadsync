@@ -35,9 +35,7 @@ type esemenyJSON struct {
 	Helyszin    helyszinJSON `json:"helyszin"`
 	SzervezoID  string       `json:"szervezoId"`
 	Allapot     string       `json:"allapot"`
-	// ConfirmedIdopontID is null when no Idopont is confirmed.
-	ConfirmedIdopontID *string   `json:"confirmedIdopontId"`
-	CreatedAt          time.Time `json:"createdAt"`
+	CreatedAt   time.Time    `json:"createdAt"`
 }
 
 type esemenySummaryJSON struct {
@@ -86,25 +84,23 @@ type esemenyDetailJSON struct {
 	CsoportName  string        `json:"csoportName"`
 	SzervezoName string        `json:"szervezoName"`
 	Idopontok    []idopontJSON `json:"idopontok"`
+	// ConfirmedIdopontID is set only while the Esemeny has Resztvevok
+	// (Veglegesitve, Lezajlott), null otherwise.
+	ConfirmedIdopontID *string `json:"confirmedIdopontId"`
 	// Resztvevok are empty unless the Esemeny is Veglegesitve or Lezajlott.
 	Resztvevok []resztvevoJSON `json:"resztvevok"`
 }
 
 func toEsemenyJSON(e domain.Esemeny) esemenyJSON {
-	var confirmed *string
-	if e.ConfirmedIdopontID != "" {
-		confirmed = &e.ConfirmedIdopontID
-	}
 	return esemenyJSON{
-		ConfirmedIdopontID: confirmed,
-		ID:                 e.ID,
-		CsoportID:          e.CsoportID,
-		Title:              e.Title,
-		Description:        e.Description,
-		Helyszin:           helyszinJSON{Name: e.Helyszin.Name, URL: e.Helyszin.URL},
-		SzervezoID:         e.SzervezoID,
-		Allapot:            string(e.Allapot),
-		CreatedAt:          e.CreatedAt,
+		ID:          e.ID,
+		CsoportID:   e.CsoportID,
+		Title:       e.Title,
+		Description: e.Description,
+		Helyszin:    helyszinJSON{Name: e.Helyszin.Name, URL: e.Helyszin.URL},
+		SzervezoID:  e.SzervezoID,
+		Allapot:     string(e.Allapot),
+		CreatedAt:   e.CreatedAt,
 	}
 }
 
@@ -202,12 +198,21 @@ func (s *server) getEsemeny(w http.ResponseWriter, r *http.Request, felhasznaloI
 		resztvevok = append(resztvevok, resztvevoJSON{FelhasznaloID: r.FelhasznaloID, Name: r.Name, IsTag: r.IsTag})
 	}
 	writeJSON(w, http.StatusOK, esemenyDetailJSON{
-		esemenyJSON:  toEsemenyJSON(d.Esemeny),
-		CsoportName:  d.CsoportName,
-		SzervezoName: d.SzervezoName,
-		Idopontok:    idopontok,
-		Resztvevok:   resztvevok,
+		esemenyJSON:        toEsemenyJSON(d.Esemeny),
+		CsoportName:        d.CsoportName,
+		SzervezoName:       d.SzervezoName,
+		Idopontok:          idopontok,
+		Resztvevok:         resztvevok,
+		ConfirmedIdopontID: nullable(d.ConfirmedIdopont),
 	})
+}
+
+// nullable is nil for "", so JSON shows null.
+func nullable(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 func (s *server) confirmIdopont(w http.ResponseWriter, r *http.Request, felhasznaloID string) {

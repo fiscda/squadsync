@@ -85,6 +85,10 @@ type EsemenyDetail struct {
 	SzervezoName string
 	// Idopontok are in chronological order.
 	Idopontok []IdopontAllas
+	// ConfirmedIdopont is the confirmed Idopont's id while the Esemeny has
+	// Resztvevok (Veglegesitve, Lezajlott), "" otherwise. Use it rather
+	// than the stored Esemeny.ConfirmedIdopontID.
+	ConfirmedIdopont string
 	// Resztvevok are ordered by name; empty unless the Esemeny is
 	// Veglegesitve or Lezajlott (see resztvevokOf).
 	Resztvevok []domain.Resztvevo
@@ -325,12 +329,14 @@ func esemenyDetail(ctx context.Context, q store.Queries, e domain.Esemeny, viewe
 	if err != nil {
 		return EsemenyDetail{}, err
 	}
+	confirmed, _ := confirmedIdopont(e)
 	return EsemenyDetail{
-		Esemeny:      e,
-		CsoportName:  csoport.Name,
-		SzervezoName: szervezo.Name,
-		Idopontok:    idopontAllasok(e, idopontok, visszajelzesek, viewerID),
-		Resztvevok:   resztvevokOf(e, visszajelzesek),
+		Esemeny:          e,
+		CsoportName:      csoport.Name,
+		SzervezoName:     szervezo.Name,
+		Idopontok:        idopontAllasok(e, idopontok, visszajelzesek, viewerID),
+		ConfirmedIdopont: confirmed,
+		Resztvevok:       resztvevokOf(e, visszajelzesek),
 	}, nil
 }
 
@@ -338,12 +344,13 @@ func esemenyDetail(ctx context.Context, q store.Queries, e domain.Esemeny, viewe
 func idopontAllasok(e domain.Esemeny, idopontok []domain.Idopont, visszajelzesek []domain.VisszajelzesOfEsemeny, viewerID string) []IdopontAllas {
 	out := make([]IdopontAllas, len(idopontok))
 	index := make(map[string]int, len(idopontok))
+	confirmed, ok := confirmedIdopont(e)
 	for n, i := range idopontok {
 		out[n] = IdopontAllas{
 			Idopont:        i,
 			Visszajelzesek: []domain.VisszajelzesOfEsemeny{},
 			Answerable:     answerable(e, i),
-			Confirmed:      hasResztvevok(e.Allapot) && i.ID == e.ConfirmedIdopontID,
+			Confirmed:      ok && i.ID == confirmed,
 		}
 		index[i.ID] = n
 	}
@@ -423,11 +430,17 @@ func (a *App) SetVisszajelzes(ctx context.Context, felhasznaloID, esemenyID, ido
 		}); err != nil {
 			return err
 		}
-		// #16 releases the drop-out's claims here, in this transaction, and
-		// #24 adds or removes their calendar event (joining is
-		// makesResztvevo(e, i, valasz) && !makesResztvevo(e, i, before)).
+		droppedOut := makesResztvevo(e, i, before) && !makesResztvevo(e, i, valasz)
+		if !droppedOut {
+			return nil
+		}
+		// #16 releases the drop-out's claims here, in this transaction, the
+		// Szervezo's own included, and #24 removes their calendar event.
+		// (Joining, for #24, is makesResztvevo(e, i, valasz) &&
+		// !makesResztvevo(e, i, before).)
+
 		// The Szervezo dropping out needs no DM to themselves.
-		if makesResztvevo(e, i, before) && !makesResztvevo(e, i, valasz) && felhasznaloID != e.SzervezoID {
+		if felhasznaloID != e.SzervezoID {
 			d, err := a.dropOut(ctx, q, e, felhasznaloID)
 			if err != nil {
 				return err
@@ -462,7 +475,8 @@ func answerable(e domain.Esemeny, i domain.Idopont) bool {
 	case domain.Egyeztetes:
 		return true
 	case domain.Veglegesitve:
-		return i.ID == e.ConfirmedIdopontID
+		confirmed, ok := confirmedIdopont(e)
+		return ok && i.ID == confirmed
 	default:
 		return false
 	}

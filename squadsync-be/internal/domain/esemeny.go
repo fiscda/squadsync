@@ -31,9 +31,10 @@ type Esemeny struct {
 	// whoever proposed it.
 	SzervezoID string
 	Allapot    Allapot
-	// ConfirmedIdopontID is the Idopont the Szervezo confirmed. It is set
-	// in Veglegesitve and Lezajlott, "" in Egyeztetes, and kept when a
-	// Veglegesitve Esemeny becomes Elmaradt.
+	// ConfirmedIdopontID is the stored confirmed Idopont: set in
+	// Veglegesitve and Lezajlott, "" in Egyeztetes. Elmaradt keeps it only
+	// as a record of what was planned, so read it through the core's
+	// confirmedIdopont, which ignores it there.
 	ConfirmedIdopontID string
 	CreatedAt          time.Time
 }

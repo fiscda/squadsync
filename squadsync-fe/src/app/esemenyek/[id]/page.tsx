@@ -6,6 +6,7 @@ import { getEsemeny } from "@/lib/esemeny";
 import { requireFelhasznalo } from "@/lib/felhasznalo";
 import { cardClass, linkClass, secondaryButtonClass } from "@/lib/ui";
 import {
+  type AllapotHiba,
   confirmIdopontAction,
   reopenEgyeztetesAction,
   setVisszajelzesAction,
@@ -18,20 +19,40 @@ import {
 } from "../format";
 import { CancelEsemeny } from "./cancel-esemeny";
 
-export default function EsemenyPage({ params }: PageProps<"/esemenyek/[id]">) {
+export default function EsemenyPage({
+  params,
+  searchParams,
+}: PageProps<"/esemenyek/[id]">) {
   return (
     <main className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-8 px-4 py-12">
       <Suspense fallback={<p className="text-zinc-500">Betöltés…</p>}>
-        {params.then(({ id }) => (
-          <Esemeny esemenyId={id} />
+        {Promise.all([params, searchParams]).then(([{ id }, { hiba }]) => (
+          <Esemeny esemenyId={id} hiba={hiba} />
         ))}
       </Suspense>
     </main>
   );
 }
 
+/** Why the Szervező's last change was refused (see changeAllapot). */
+const hibaText: Record<AllapotHiba, string> = {
+  szervezo: "Ezt csak az esemény szervezője teheti meg.",
+  allapot:
+    "Ez most nem lehetséges, mert az esemény állapota közben megváltozott. Az oldal már a mostani állapotot mutatja.",
+};
+
+function isAllapotHiba(value: unknown): value is AllapotHiba {
+  return value === "szervezo" || value === "allapot";
+}
+
 // Reads the session and the route params, so it streams in behind Suspense.
-async function Esemeny({ esemenyId }: { esemenyId: string }) {
+async function Esemeny({
+  esemenyId,
+  hiba,
+}: {
+  esemenyId: string;
+  hiba: string | string[] | undefined;
+}) {
   const esemeny = await getEsemeny(esemenyId);
   if (!esemeny) {
     // Not a Tag, or no such Esemény: the same answer either way.
@@ -59,6 +80,15 @@ async function Esemeny({ esemenyId }: { esemenyId: string }) {
           {allapotLabel[esemeny.allapot]} · Szervező: {esemeny.szervezoName}
         </p>
       </div>
+
+      {isAllapotHiba(hiba) ? (
+        <p
+          role="alert"
+          className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+        >
+          {hibaText[hiba]}
+        </p>
+      ) : null}
 
       {esemeny.allapot === "elmaradt" ? (
         <p className="rounded-2xl border border-red-300 bg-red-50 p-4 font-medium text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
@@ -157,6 +187,7 @@ function Resztvevok({ esemeny }: { esemeny: EsemenyDetail }) {
       ) : (
         <ul className="flex flex-wrap gap-2">
           {esemeny.resztvevok.map((r) => (
+            // Name-only Vendégs (#13) have no felhasznaloId: they need another key.
             <li
               key={r.felhasznaloId}
               className="rounded-full bg-green-100 px-3 py-1 text-sm text-green-900 dark:bg-green-950 dark:text-green-200"

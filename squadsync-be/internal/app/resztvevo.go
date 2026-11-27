@@ -15,12 +15,24 @@ func hasResztvevok(allapot domain.Allapot) bool {
 	return allapot == domain.Veglegesitve || allapot == domain.Lezajlott
 }
 
+// confirmedIdopont returns the Esemeny's confirmed Idopont while it counts:
+// in Veglegesitve and Lezajlott. An Elmaradt Esemeny keeps the column only
+// as a record, so this reports none there. Every rule reads the confirmed
+// Idopont through here.
+func confirmedIdopont(e domain.Esemeny) (string, bool) {
+	if !hasResztvevok(e.Allapot) || e.ConfirmedIdopontID == "" {
+		return "", false
+	}
+	return e.ConfirmedIdopontID, true
+}
+
 // makesResztvevo tells whether answering valasz to the Idopont makes
 // someone who counts (see countsAsResztvevo) a Resztvevo of the Esemeny.
 // Comparing it before and after a change of Visszajelzes tells a drop-out
 // (true, then false) from someone joining (false, then true).
 func makesResztvevo(e domain.Esemeny, i domain.Idopont, valasz domain.Valasz) bool {
-	return hasResztvevok(e.Allapot) && i.ID == e.ConfirmedIdopontID && valasz == domain.Igen
+	confirmed, ok := confirmedIdopont(e)
+	return ok && i.ID == confirmed && valasz == domain.Igen
 }
 
 // countsAsResztvevo tells whether the giver of a Visszajelzes can be a
@@ -36,11 +48,12 @@ func countsAsResztvevo(v domain.VisszajelzesOfEsemeny) bool {
 // #16) reads q.ListVisszajelzesekOfEsemeny and passes it here.
 func resztvevokOf(e domain.Esemeny, visszajelzesek []domain.VisszajelzesOfEsemeny) []domain.Resztvevo {
 	out := []domain.Resztvevo{}
-	if !hasResztvevok(e.Allapot) {
+	confirmed, ok := confirmedIdopont(e)
+	if !ok {
 		return out
 	}
 	for _, v := range visszajelzesek {
-		if v.IdopontID != e.ConfirmedIdopontID || v.Valasz != domain.Igen || !countsAsResztvevo(v) {
+		if v.IdopontID != confirmed || v.Valasz != domain.Igen || !countsAsResztvevo(v) {
 			continue
 		}
 		out = append(out, domain.Resztvevo{

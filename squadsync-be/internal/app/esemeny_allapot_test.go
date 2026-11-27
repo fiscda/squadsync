@@ -3,6 +3,7 @@ package app_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"squadsync-be/internal/app"
@@ -92,7 +93,7 @@ func TestSzervezoConfirmsAnyIdopontNotOnlyTheFirstPlaced(t *testing.T) {
 	confirm(t, h, "anna", d, 2) // 2nd place
 
 	got := detail(t, h, "bela", e.ID)
-	if got.Allapot != domain.Veglegesitve || got.ConfirmedIdopontID != d.Idopontok[2].ID {
+	if got.Allapot != domain.Veglegesitve || got.ConfirmedIdopont != d.Idopontok[2].ID {
 		t.Fatalf("esemeny = %+v, want Veglegesitve with the third Idopont", got.Esemeny)
 	}
 	if got.Idopontok[0].Confirmed || got.Idopontok[1].Confirmed || !got.Idopontok[2].Confirmed {
@@ -181,6 +182,59 @@ func TestEveryTransitionValidAndInvalid(t *testing.T) {
 				t.Fatalf("allapot = %s, want %s", got, tc.after)
 			}
 		})
+	}
+}
+
+func TestOfTwoConcurrentConfirmationsExactlyOneWins(t *testing.T) {
+	h := apptest.New(t)
+	c := csoportOf(t, h, "bela")
+	e := propose(t, h, "anna", c.ID, 2)
+	d := detail(t, h, "anna", e.ID)
+
+	errs := make([]error, 2)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for n := range errs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			errs[n] = h.App.ConfirmIdopont(context.Background(), "anna", e.ID, d.Idopontok[n].ID)
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	won := -1
+	for n, err := range errs {
+		switch {
+		case err == nil:
+			if won != -1 {
+				t.Fatalf("both confirmations succeeded")
+			}
+			won = n
+		case !errors.Is(err, app.ErrInvalidTransition):
+			t.Fatalf("confirmation %d: err = %v, want nil or ErrInvalidTransition", n, err)
+		}
+	}
+	if won == -1 {
+		t.Fatalf("neither confirmation succeeded: %v", errs)
+	}
+	if got := detail(t, h, "anna", e.ID); got.ConfirmedIdopont != d.Idopontok[won].ID {
+		t.Fatalf("confirmed = %q, want the winner's %q", got.ConfirmedIdopont, d.Idopontok[won].ID)
+	}
+	if anns := len(h.Discord.Announcements()); anns != 0 {
+		// No Csatorna: the winner's announcement went by DM, once.
+		t.Fatalf("channel announcements = %d, want none", anns)
+	}
+	var announced int
+	for _, dm := range h.Discord.DMsTo("discord-bela") {
+		if dm.Announcement != nil {
+			announced++
+		}
+	}
+	if announced != 1 {
+		t.Fatalf("Bela got %d announcements, want exactly one", announced)
 	}
 }
 
@@ -281,7 +335,7 @@ func TestResztvevokAreGoneOnceReopenedOrElmaradt(t *testing.T) {
 	cancelEsemeny(t, h, "anna", e.ID)
 	got := detail(t, h, "anna", e.ID)
 	expectResztvevok(t, got)
-	if got.Idopontok[0].Confirmed {
+	if got.Idopontok[0].Confirmed || got.ConfirmedIdopont != "" {
 		t.Fatal("an Elmaradt Esemeny still shows a confirmed Idopont")
 	}
 }
@@ -299,7 +353,7 @@ func TestReopeningKeepsEveryVisszajelzes(t *testing.T) {
 	reopen(t, h, "anna", e.ID)
 
 	got := detail(t, h, "bela", e.ID)
-	if got.Allapot != domain.Egyeztetes || got.ConfirmedIdopontID != "" {
+	if got.Allapot != domain.Egyeztetes || got.ConfirmedIdopont != "" {
 		t.Fatalf("esemeny = %+v, want Egyeztetes without a confirmed Idopont", got.Esemeny)
 	}
 	if got.Idopontok[0].Sajat != domain.Igen || got.Idopontok[1].Sajat != domain.Nem || got.Idopontok[1].Talan != 1 {
@@ -392,6 +446,10 @@ func TestNoDropOutDMForOtherChanges(t *testing.T) {
 			answer(t, h, "bela", d, 0, domain.Talan)
 			confirm(t, h, "anna", d, 0)
 			answer(t, h, "bela", d, 0, domain.Nem)
+		},
+		"a first answer of talan": func(t *testing.T, h *apptest.Harness, d app.EsemenyDetail) {
+			confirm(t, h, "anna", d, 0)
+			answer(t, h, "bela", d, 0, domain.Talan)
 		},
 		"a first answer of nem": func(t *testing.T, h *apptest.Harness, d app.EsemenyDetail) {
 			confirm(t, h, "anna", d, 0)

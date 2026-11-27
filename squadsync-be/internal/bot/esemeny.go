@@ -128,7 +128,7 @@ func announcementText(a gateway.Announcement, inDM bool) string {
 		s += fmt.Sprintf(csoportFormat, escapeMarkdown(a.CsoportName))
 	}
 	if a.Detail != "" {
-		s += fmt.Sprintf(detailFormat, a.Detail)
+		s += fmt.Sprintf(detailFormat, escapeMarkdown(a.Detail))
 	}
 	if a.Link != "" {
 		s += fmt.Sprintf(linkFormat, a.Link)
@@ -235,16 +235,13 @@ func helyszin(m gateway.EsemenyMessage) string {
 	return field(m.HelyszinName, maxEmbedFieldValueLength)
 }
 
-// resztvevok lists the Resztvevok' names, cut to fit a field.
+// resztvevok lists the Resztvevok' names, escaped and then cut to fit a
+// field (as field does), so the cut never splits an escape.
 func resztvevok(names []string) string {
 	if len(names) == 0 {
 		return noResztvevo
 	}
-	escaped := make([]string, len(names))
-	for n, name := range names {
-		escaped[n] = escapeMarkdown(name)
-	}
-	return truncate(strings.Join(escaped, ", "), maxEmbedFieldValueLength)
+	return field(strings.Join(names, ", "), maxEmbedFieldValueLength)
 }
 
 // allas shows an Idopont's counts and Helyezes.

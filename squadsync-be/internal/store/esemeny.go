@@ -200,7 +200,8 @@ func (q Queries) UpsertVisszajelzes(ctx context.Context, v domain.Visszajelzes) 
 }
 
 // FindValasz returns the Felhasznalo's Visszajelzes on the Idopont, or ""
-// if they haven't answered it.
+// if they haven't answered it. A name-only Vendeg's (#13) needs its own
+// lookup by vendeg_id.
 func (q Queries) FindValasz(ctx context.Context, idopontID, felhasznaloID string) (domain.Valasz, error) {
 	var valasz string
 	err := q.db.QueryRowContext(ctx,

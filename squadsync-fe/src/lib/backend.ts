@@ -347,11 +347,6 @@ export type Esemeny = {
   helyszin: Helyszin;
   szervezoId: string;
   allapot: Allapot;
-  /**
-   * The confirmed Időpont: set in Véglegesítve and Lezajlott, kept when a
-   * Véglegesítve Esemény became Elmaradt, null otherwise.
-   */
-  confirmedIdopontId: string | null;
   /** RFC 3339, UTC */
   createdAt: string;
 };
@@ -415,6 +410,8 @@ export type EsemenyDetail = Esemeny & {
   szervezoName: string;
   /** In chronological order. */
   idopontok: Idopont[];
+  /** The confirmed Időpont while Véglegesítve or Lezajlott, null otherwise. */
+  confirmedIdopontId: string | null;
   /** Ordered by name; empty unless Véglegesítve or Lezajlott. */
   resztvevok: Resztvevo[];
 };

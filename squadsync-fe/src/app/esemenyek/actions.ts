@@ -175,9 +175,16 @@ export async function setVisszajelzesAction(
 }
 
 /**
- * Runs one of the Szervező's lifecycle changes. A stale page (no longer the
- * Szervező: 403, or the Esemény already changed: 409) just refreshes, which
- * shows the current state and controls; a lost Tag goes back to the list.
+ * Why a lifecycle change was refused, shown on the Esemény page as
+ * ?hiba=<value>.
+ */
+export type AllapotHiba = "szervezo" | "allapot";
+
+/**
+ * Runs one of the Szervező's lifecycle changes, then reloads the page
+ * without any earlier notice. A refusal (no longer the Szervező: 403, or
+ * the Esemény already changed: 409) reloads it with a notice saying why; a
+ * lost Tag goes back to the list.
  */
 async function changeAllapot(
   esemenyId: string,
@@ -193,13 +200,15 @@ async function changeAllapot(
         redirect("/csoportok");
       }
       if (err.status === 403 || err.status === 409) {
+        const hiba: AllapotHiba = err.status === 403 ? "szervezo" : "allapot";
         revalidatePath(`/esemenyek/${esemenyId}`);
-        return;
+        redirect(`/esemenyek/${esemenyId}?hiba=${hiba}`);
       }
     }
     throw err;
   }
   revalidatePath(`/esemenyek/${esemenyId}`);
+  redirect(`/esemenyek/${esemenyId}`);
 }
 
 /** The Szervező confirms one Időpont: the Esemény becomes Véglegesítve. */

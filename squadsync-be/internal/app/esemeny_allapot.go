@@ -109,6 +109,8 @@ func (a *App) CancelEsemeny(ctx context.Context, felhasznaloID, esemenyID string
 		if e.Allapot != domain.Egyeztetes && e.Allapot != domain.Veglegesitve {
 			return ErrInvalidTransition
 		}
+		// The stored confirmed Idopont stays, only as a record; nothing reads
+		// it in Elmaradt (see confirmedIdopont).
 		if err := q.UpdateEsemenyAllapot(ctx, e.ID, domain.Elmaradt, e.ConfirmedIdopontID); err != nil {
 			return err
 		}
