@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"strings"
 	"time"
 
@@ -24,12 +26,10 @@ import (
 // discordCallTimeout bounds one call to Discord.
 const discordCallTimeout = 10 * time.Second
 
-// Text of the Esemeny's Discord messages.
+// Notes under the Idopontok of an Esemeny's message.
 const (
-	voteRequestFormat = "Új esemény a(z) **%s** csoportban: **%s** – válaszolj!"
-	channelLinkFormat = "\nÜzenet a csatornában: %s"
-	webLinkFormat     = "\nWeboldal: %s"
-	tooManyIdopontok  = "Több mint %d időpont van, ezért itt nem lehet gombokkal válaszolni: válaszolj a weboldalon."
+	tooManyIdopontok = "Több mint %d időpont van, ezért itt nem lehet gombokkal válaszolni: válaszolj a weboldalon."
+	webPageNote      = "Weboldal: %s"
 )
 
 var allapotLabels = map[domain.Allapot]string{
@@ -39,54 +39,16 @@ var allapotLabels = map[domain.Allapot]string{
 	domain.Lezajlott:    "Lezajlott",
 }
 
-// afterCommit runs Discord work once a use case has committed: in the
-// background with AsyncDiscord, at once otherwise. Jobs run one at a time,
-// so each one reads the latest state and edits land in order.
-func (a *App) afterCommit(job func(ctx context.Context)) {
-	run := func() {
-		a.discordMu.Lock()
-		defer a.discordMu.Unlock()
-		job(context.Background())
-	}
-	if !a.asyncDiscord {
-		run()
-		return
-	}
-	a.background.Add(1)
-	go func() {
-		defer a.background.Done()
-		run()
-	}()
-}
-
-// WaitDiscord waits for Discord work still running in the background. The
-// server calls it while shutting down.
-func (a *App) WaitDiscord() {
-	a.background.Wait()
-}
-
-// EsemenyMessage returns what the Esemeny's Discord message says now. Only
-// Tags of its Csoport may see it; anyone else gets ErrNotFound. The bot
-// uses it to update the message a button was pressed on.
-func (a *App) EsemenyMessage(ctx context.Context, felhasznaloID, esemenyID string) (gateway.EsemenyMessage, error) {
-	q := a.store.Queries
-	e, err := requireEsemenyTag(ctx, q, esemenyID, felhasznaloID)
-	if err != nil {
-		return gateway.EsemenyMessage{}, err
-	}
-	return a.esemenyMessage(ctx, q, e)
-}
-
 // esemenyMessage builds the Esemeny's Discord message.
 func (a *App) esemenyMessage(ctx context.Context, q store.Queries, e domain.Esemeny) (gateway.EsemenyMessage, error) {
 	d, err := esemenyDetail(ctx, q, e, "")
 	if err != nil {
 		return gateway.EsemenyMessage{}, err
 	}
+	pageURL := a.esemenyURL(e.ID)
 	m := gateway.EsemenyMessage{
 		EsemenyID:    e.ID,
 		Title:        e.Title,
-		URL:          a.esemenyURL(e.ID),
 		Description:  e.Description,
 		CsoportName:  d.CsoportName,
 		Allapot:      allapotLabels[e.Allapot],
@@ -112,24 +74,47 @@ func (a *App) esemenyMessage(ctx context.Context, q store.Queries, e domain.Esem
 		}
 		m.Idopontok[n] = line
 	}
+	linkable := discordLinkable(pageURL)
+	if linkable {
+		m.URL = pageURL
+	}
+	var notes []string
 	if answerableCount > gateway.MaxAnswerRows {
 		// The buttons don't fit on one message: answer on the web.
 		for n := range m.Idopontok {
 			m.Idopontok[n].Answerable = false
 		}
-		m.Note = fmt.Sprintf(tooManyIdopontok, gateway.MaxAnswerRows)
-		m.WebButton = true
+		notes = append(notes, fmt.Sprintf(tooManyIdopontok, gateway.MaxAnswerRows))
+		m.WebButton = linkable
 	}
+	if !linkable {
+		notes = append(notes, fmt.Sprintf(webPageNote, pageURL))
+	}
+	m.Note = strings.Join(notes, "\n")
 	return m, nil
+}
+
+// discordLinkable tells whether Discord accepts u as an embed or button
+// link: an http(s) URL whose host is a domain name with a dot. Discord
+// rejects localhost, IP addresses and other hosts without a TLD, as when
+// developing locally.
+func discordLinkable(u string) bool {
+	p, err := url.Parse(u)
+	if err != nil || (p.Scheme != "http" && p.Scheme != "https") {
+		return false
+	}
+	host := p.Hostname()
+	return strings.Contains(host, ".") && net.ParseIP(host) == nil && host != "localhost"
 }
 
 func (a *App) esemenyURL(esemenyID string) string {
 	return strings.TrimRight(a.webURL, "/") + "/esemenyek/" + esemenyID
 }
 
-// announceEsemeny announces a newly proposed Esemeny: it posts its message
-// in the Csoport's Csatorna and asks every Tag but the Szervezo, by DM, to
-// answer. Without a Csatorna, the DM carries the Esemeny's message itself.
+// announceEsemeny announces a newly proposed Esemeny. With a Csatorna, it
+// posts the Esemeny's message there and asks every Tag but the Szervezo, by
+// DM, to answer. Without one, every Tag gets the Esemeny's message by DM,
+// the Szervezo too, so they have something in Discord to follow.
 func (a *App) announceEsemeny(ctx context.Context, esemenyID string) {
 	q := a.store.Queries
 	e, err := q.FindEsemeny(ctx, esemenyID)
@@ -154,35 +139,37 @@ func (a *App) announceEsemeny(ctx context.Context, esemenyID string) {
 		return
 	}
 
-	voteRequest := fmt.Sprintf(voteRequestFormat, m.CsoportName, m.Title)
-	if hasCsatorna {
-		cctx, cancel := context.WithTimeout(ctx, discordCallTimeout)
-		ref, err := a.discord.PostEsemenyMessage(cctx, csatorna.ChannelID, m)
-		cancel()
-		a.logDiscordError("post esemeny", err, "esemeny", e.ID, "channel_id", csatorna.ChannelID)
-		if err == nil {
-			a.rememberMessage(ctx, e.ID, domain.InCsatorna, ref)
-			voteRequest += fmt.Sprintf(channelLinkFormat, messageLink(csatorna.GuildID, ref))
+	voteRequest := gateway.VoteRequest{CsoportName: m.CsoportName, Title: m.Title}
+	if !hasCsatorna {
+		for _, t := range tags {
+			for _, ref := range a.sendEsemenyDM(ctx, e.CsoportID, t.FelhasznaloID, voteRequest, m) {
+				a.rememberMessage(ctx, e.ID, domain.InDM, ref)
+			}
 		}
-		voteRequest += fmt.Sprintf(webLinkFormat, m.URL)
+		return
 	}
 
+	cctx, cancel := context.WithTimeout(ctx, discordCallTimeout)
+	ref, err := a.discord.PostEsemenyMessage(cctx, csatorna.ChannelID, m)
+	cancel()
+	a.logDiscordError("post esemeny", err, "esemeny", e.ID, "channel_id", csatorna.ChannelID)
+	if err == nil {
+		a.rememberMessage(ctx, e.ID, domain.InCsatorna, ref)
+		voteRequest.ChannelMessageURL = messageLink(csatorna.GuildID, ref)
+	}
+	voteRequest.WebURL = a.esemenyURL(e.ID)
 	for _, t := range tags {
 		if t.FelhasznaloID == e.SzervezoID {
-			continue // a new Esemeny's Szervezo is the only one who knows about it
+			continue // the Szervezo has just proposed it
 		}
-		if hasCsatorna {
-			a.sendDM(ctx, e.CsoportID, t.FelhasznaloID, voteRequest)
-			continue
-		}
-		for _, ref := range a.sendEsemenyDM(ctx, e.CsoportID, t.FelhasznaloID, voteRequest, m) {
-			a.rememberMessage(ctx, e.ID, domain.InDM, ref)
-		}
+		a.sendVoteRequestDM(ctx, e.CsoportID, t.FelhasznaloID, voteRequest)
 	}
 }
 
 // refreshEsemenyMessages edits every Discord message of the Esemeny to show
-// its current state.
+// its current state. It is the only writer of those messages after they
+// are sent: a button press acknowledges without changing the message and
+// leaves the update to this job, so edits never race.
 func (a *App) refreshEsemenyMessages(ctx context.Context, esemenyID string) {
 	q := a.store.Queries
 	refs, err := q.ListEsemenyDiscordMessages(ctx, esemenyID)

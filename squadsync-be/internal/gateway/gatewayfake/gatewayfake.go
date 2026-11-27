@@ -14,8 +14,11 @@ import (
 // DM is one direct message sent through the fake Discord.
 type DM struct {
 	DiscordID string
-	Content   string
-	// Esemeny is the Esemeny message under Content, nil for a plain DM.
+	// Content is a plain DM's text.
+	Content string
+	// VoteRequest is set for a vote request, alone or above an Esemeny.
+	VoteRequest *gateway.VoteRequest
+	// Esemeny is the Esemeny message sent, nil if none.
 	Esemeny *gateway.EsemenyMessage
 	// Ref is the sent message, set only when Esemeny is.
 	Ref gateway.MessageRef
@@ -71,15 +74,26 @@ func (d *Discord) SendDM(_ context.Context, discordID string, content string) er
 	return nil
 }
 
+// SendVoteRequestDM records the message.
+func (d *Discord) SendVoteRequestDM(_ context.Context, discordID string, r gateway.VoteRequest) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.fail != nil {
+		return d.fail
+	}
+	d.dms = append(d.dms, DM{DiscordID: discordID, VoteRequest: &r})
+	return nil
+}
+
 // SendEsemenyDM records the message.
-func (d *Discord) SendEsemenyDM(_ context.Context, discordID, content string, m gateway.EsemenyMessage) (gateway.MessageRef, error) {
+func (d *Discord) SendEsemenyDM(_ context.Context, discordID string, r gateway.VoteRequest, m gateway.EsemenyMessage) (gateway.MessageRef, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.fail != nil {
 		return gateway.MessageRef{}, d.fail
 	}
 	ref := d.newRef("dm-" + discordID)
-	d.dms = append(d.dms, DM{DiscordID: discordID, Content: content, Esemeny: &m, Ref: ref})
+	d.dms = append(d.dms, DM{DiscordID: discordID, VoteRequest: &r, Esemeny: &m, Ref: ref})
 	return ref, nil
 }
 

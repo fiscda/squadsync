@@ -13,11 +13,12 @@ import (
 
 // dmAccounts returns the Discord ids to DM the Felhasznalo on about the
 // Csoport: every linked account. This is the one place to skip a Tag who
-// muted the Csoport (#11).
+// muted the Csoport. csoportID is unused until #11 adds DM muting per Tag;
+// every caller already passes it so that #11 only changes this function.
 func (a *App) dmAccounts(ctx context.Context, csoportID, felhasznaloID string) []string {
 	accounts, err := a.store.ListDiscordAccounts(ctx, felhasznaloID)
 	if err != nil {
-		a.log.Error("list discord accounts for a dm", "felhasznalo", felhasznaloID, "err", err)
+		a.log.Error("list discord accounts for a dm", "felhasznalo", felhasznaloID, "csoport", csoportID, "err", err)
 		return nil
 	}
 	ids := make([]string, len(accounts))
@@ -27,25 +28,25 @@ func (a *App) dmAccounts(ctx context.Context, csoportID, felhasznaloID string) [
 	return ids
 }
 
-// sendDM sends a plain DM about the Csoport to every Discord account of the
-// Felhasznalo.
-func (a *App) sendDM(ctx context.Context, csoportID, felhasznaloID, content string) {
+// sendVoteRequestDM asks the Felhasznalo, on every Discord account, to
+// answer a new Esemeny of the Csoport.
+func (a *App) sendVoteRequestDM(ctx context.Context, csoportID, felhasznaloID string, r gateway.VoteRequest) {
 	for _, discordID := range a.dmAccounts(ctx, csoportID, felhasznaloID) {
 		cctx, cancel := context.WithTimeout(ctx, discordCallTimeout)
-		err := a.discord.SendDM(cctx, discordID, content)
+		err := a.discord.SendVoteRequestDM(cctx, discordID, r)
 		cancel()
-		a.logDiscordError("send dm", err, "felhasznalo", felhasznaloID, "discord_id", discordID)
+		a.logDiscordError("send vote request dm", err, "felhasznalo", felhasznaloID, "discord_id", discordID)
 	}
 }
 
-// sendEsemenyDM sends an Esemeny's message about the Csoport, with content
-// above it, to every Discord account of the Felhasznalo. It returns the
-// messages that were sent.
-func (a *App) sendEsemenyDM(ctx context.Context, csoportID, felhasznaloID, content string, m gateway.EsemenyMessage) []gateway.MessageRef {
+// sendEsemenyDM sends an Esemeny's message of the Csoport, with the vote
+// request above it, to every Discord account of the Felhasznalo. It returns
+// the messages that were sent.
+func (a *App) sendEsemenyDM(ctx context.Context, csoportID, felhasznaloID string, r gateway.VoteRequest, m gateway.EsemenyMessage) []gateway.MessageRef {
 	var sent []gateway.MessageRef
 	for _, discordID := range a.dmAccounts(ctx, csoportID, felhasznaloID) {
 		cctx, cancel := context.WithTimeout(ctx, discordCallTimeout)
-		ref, err := a.discord.SendEsemenyDM(cctx, discordID, content, m)
+		ref, err := a.discord.SendEsemenyDM(cctx, discordID, r, m)
 		cancel()
 		if err != nil {
 			a.logDiscordError("send esemeny dm", err, "felhasznalo", felhasznaloID, "discord_id", discordID, "esemeny", m.EsemenyID)

@@ -43,6 +43,10 @@ import (
 
 const minSecretLength = 32
 
+// discordShutdownTimeout bounds how long shutdown waits for queued Discord
+// messages.
+const discordShutdownTimeout = 10 * time.Second
+
 type config struct {
 	dbPath string
 	secret string
@@ -152,9 +156,11 @@ func run(log *slog.Logger, args []string) error {
 	if err := srv.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
-	// Let Discord messages already on their way finish (each call is
-	// bounded) before the bot disconnects.
-	a.WaitDiscord()
+	// Let queued Discord messages go out before the bot disconnects, for at
+	// most discordShutdownTimeout; the rest are abandoned.
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), discordShutdownTimeout)
+	defer cancelWait()
+	a.WaitDiscord(waitCtx)
 	return nil
 }
 

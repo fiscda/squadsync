@@ -2,7 +2,6 @@ package bot_test
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/bwmarrin/discordgo"
@@ -13,7 +12,7 @@ import (
 )
 
 // proposeEsemeny has Anna propose an Esemeny with two Idopontok. There is no
-// Csatorna, so Bela gets it by DM with the answer buttons.
+// Csatorna, Anna and Bela get it by DM with the answer buttons.
 func (w world) proposeEsemeny(t *testing.T) app.EsemenyDetail {
 	t.Helper()
 	ctx := context.Background()
@@ -49,37 +48,30 @@ func answerButton(t *testing.T, discordID, esemenyID, idopontID string, v domain
 	}
 }
 
-func TestAnswerButtonRecordsTheVisszajelzesAndUpdatesTheMessage(t *testing.T) {
+func TestAnswerButtonRecordsTheVisszajelzesAndTheMessageIsEditedOnce(t *testing.T) {
 	w := newWorld(t)
+	ctx := context.Background()
+	if _, err := w.h.App.LinkCsatorna(ctx, "anna", app.LinkCsatornaInput{CsoportID: w.csoport.ID, GuildID: "guild-1", ChannelID: "chan-1"}); err != nil {
+		t.Fatalf("LinkCsatorna: %v", err)
+	}
 	d := w.proposeEsemeny(t)
+	post := w.h.Discord.Posts()[0]
 
-	routed := w.router.Route(context.Background(), answerButton(t, "d-bela", d.ID, d.Idopontok[1].ID, domain.Talan))
+	routed := w.router.Route(ctx, answerButton(t, "d-bela", d.ID, d.Idopontok[1].ID, domain.Talan))
 
-	resp := routed.Response
-	if resp.Type != discordgo.InteractionResponseUpdateMessage || resp.Data == nil {
-		t.Fatalf("reply = %+v, want an update of the message", resp)
+	// The press is only acknowledged; the core's refresh is the one writer.
+	if resp := routed.Response; resp.Type != discordgo.InteractionResponseDeferredMessageUpdate || resp.Data != nil || routed.Complete != nil {
+		t.Fatalf("reply = %+v, want a bare deferred update", resp)
 	}
-	if resp.Data.Content != "Új esemény – válaszolj!" {
-		t.Fatalf("content = %q, want the DM's text kept", resp.Data.Content)
+	edits := w.h.Discord.Edits()
+	if len(edits) != 1 || edits[0].Ref != post.Ref {
+		t.Fatalf("edits = %+v, want exactly one, of the channel post", edits)
 	}
-	if len(resp.Data.Embeds) != 1 {
-		t.Fatalf("embeds = %+v", resp.Data.Embeds)
-	}
-	var idopontFields []string
-	for _, f := range resp.Data.Embeds[0].Fields {
-		if strings.HasPrefix(f.Name, "1 · ") || strings.HasPrefix(f.Name, "2 · ") {
-			idopontFields = append(idopontFields, f.Name+" = "+f.Value)
-		}
-	}
-	if len(idopontFields) != 2 || !strings.Contains(idopontFields[1], "1 talán") || !strings.Contains(idopontFields[1], "1. hely") ||
-		!strings.Contains(idopontFields[0], "Még senki") {
-		t.Fatalf("idopont fields = %q, want the second with 1 talán in 1st place", idopontFields)
-	}
-	if len(resp.Data.Components) != 2 {
-		t.Fatalf("components = %+v, want a button row per Idopont", resp.Data.Components)
+	if got := edits[0].Message.Idopontok[1]; got.Talan != 1 || got.Helyezes != 1 {
+		t.Fatalf("edited idopont = %+v, want 1 talán in 1st place", got)
 	}
 
-	got, err := w.h.App.Esemeny(context.Background(), "bela", d.ID)
+	got, err := w.h.App.Esemeny(ctx, "bela", d.ID)
 	if err != nil {
 		t.Fatalf("Esemeny: %v", err)
 	}
@@ -128,38 +120,4 @@ func TestAnswerButtonWithAMalformedCustomIDIsRefused(t *testing.T) {
 
 	resp := w.router.Route(context.Background(), answerButton(t, "d-bela", d.ID, d.Idopontok[0].ID, "lehet")).Response
 	expectEphemeral(t, resp, "Ezt nem ismerem")
-}
-
-func TestMessageWithMoreThanFiveIdopontokLinksToTheWebInsteadOfButtons(t *testing.T) {
-	w := newWorld(t)
-	ctx := context.Background()
-	var idopontok []app.IdopontInput
-	for _, day := range []string{"01", "02", "03", "04", "05", "06"} {
-		idopontok = append(idopontok, app.IdopontInput{Start: "2026-12-" + day + "T20:00"})
-	}
-	e, err := w.h.App.ProposeEsemeny(ctx, "anna", w.csoport.ID, app.EsemenyInput{Title: "Sok időpont", Idopontok: idopontok})
-	if err != nil {
-		t.Fatalf("ProposeEsemeny: %v", err)
-	}
-	d, err := w.h.App.Esemeny(ctx, "anna", e.ID)
-	if err != nil {
-		t.Fatalf("Esemeny: %v", err)
-	}
-
-	// A button of an older version of the message still works.
-	resp := w.router.Route(ctx, answerButton(t, "d-bela", d.ID, d.Idopontok[0].ID, domain.Igen)).Response
-	if resp.Type != discordgo.InteractionResponseUpdateMessage || len(resp.Data.Components) != 1 {
-		t.Fatalf("reply = %+v, want an update with one row", resp.Data)
-	}
-	row, ok := resp.Data.Components[0].(discordgo.ActionsRow)
-	if !ok || len(row.Components) != 1 {
-		t.Fatalf("row = %+v, want a single link button", resp.Data.Components[0])
-	}
-	link, ok := row.Components[0].(discordgo.Button)
-	if !ok || link.Style != discordgo.LinkButton || link.URL != "https://squadsync.example/esemenyek/"+e.ID {
-		t.Fatalf("button = %+v, want a link to the Esemeny's page", row.Components[0])
-	}
-	if footer := resp.Data.Embeds[0].Footer; footer == nil || !strings.Contains(footer.Text, "weboldalon") {
-		t.Fatalf("footer = %+v, want the note about answering on the web", footer)
-	}
 }

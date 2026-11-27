@@ -21,12 +21,27 @@ type DiscordMessenger interface {
 	SendDM(ctx context.Context, discordID string, content string) error
 	// PostEsemenyMessage posts an Esemeny's message in a channel.
 	PostEsemenyMessage(ctx context.Context, channelID string, m EsemenyMessage) (MessageRef, error)
+	// SendVoteRequestDM asks one Discord account, by direct message, to
+	// answer a new Esemeny.
+	SendVoteRequestDM(ctx context.Context, discordID string, r VoteRequest) error
 	// SendEsemenyDM sends an Esemeny's message to one Discord account by
-	// direct message, with content as text above it.
-	SendEsemenyDM(ctx context.Context, discordID, content string, m EsemenyMessage) (MessageRef, error)
+	// direct message, with the vote request as text above it.
+	SendEsemenyDM(ctx context.Context, discordID string, r VoteRequest, m EsemenyMessage) (MessageRef, error)
 	// EditEsemenyMessage replaces an Esemeny's message posted earlier
 	// (in a channel or a DM) with m, in place and without notifying anyone.
 	EditEsemenyMessage(ctx context.Context, ref MessageRef, m EsemenyMessage) error
+}
+
+// VoteRequest asks a Tag to answer a new Esemeny. Its fields are plain
+// text; the bot words and escapes them.
+type VoteRequest struct {
+	CsoportName string
+	Title       string
+	// ChannelMessageURL links to the Esemeny's post in the Csatorna, "" for
+	// none.
+	ChannelMessageURL string
+	// WebURL links to the Esemeny's page on the web, "" for none.
+	WebURL string
 }
 
 // MessageRef identifies one message the bot posted.
@@ -36,11 +51,13 @@ type MessageRef struct {
 }
 
 // EsemenyMessage is what an Esemeny's Discord message says. The application
-// core decides its content; the bot only lays it out (embed, buttons).
+// core decides its content; the bot only lays it out (embed, buttons) and
+// escapes the plain-text fields for Discord's markdown.
 type EsemenyMessage struct {
 	EsemenyID string
 	Title     string
-	// URL is the Esemeny's page on the web.
+	// URL is the Esemeny's page on the web, set only when Discord accepts
+	// it as a link (not for localhost); then the Note shows it instead.
 	URL         string
 	Description string
 	CsoportName string
@@ -56,7 +73,7 @@ type EsemenyMessage struct {
 	// Note is an extra line under the Idopontok, "" for none.
 	Note string
 	// WebButton asks for a link button to URL, for when the answer buttons
-	// don't fit.
+	// don't fit. It is never set without URL.
 	WebButton bool
 }
 
@@ -116,8 +133,13 @@ func (Disabled) PostEsemenyMessage(context.Context, string, EsemenyMessage) (Mes
 	return MessageRef{}, ErrNotConfigured
 }
 
+// SendVoteRequestDM implements DiscordMessenger.
+func (Disabled) SendVoteRequestDM(context.Context, string, VoteRequest) error {
+	return ErrNotConfigured
+}
+
 // SendEsemenyDM implements DiscordMessenger.
-func (Disabled) SendEsemenyDM(context.Context, string, string, EsemenyMessage) (MessageRef, error) {
+func (Disabled) SendEsemenyDM(context.Context, string, VoteRequest, EsemenyMessage) (MessageRef, error) {
 	return MessageRef{}, ErrNotConfigured
 }
 

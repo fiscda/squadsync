@@ -10,7 +10,6 @@ package app
 import (
 	"errors"
 	"log/slog"
-	"sync"
 
 	"squadsync-be/internal/clock"
 	"squadsync-be/internal/gateway"
@@ -41,9 +40,10 @@ type Deps struct {
 	// Log receives failures that don't fail a use case, such as Discord
 	// being down. Optional.
 	Log *slog.Logger
-	// AsyncDiscord sends Discord messages in the background after a use
-	// case returns, instead of before. The server sets it, so a slow Discord
-	// never slows down the web or the bot; tests leave it off.
+	// AsyncDiscord sends Discord messages from a background worker after a
+	// use case returns, instead of before. The server sets it, so a slow
+	// Discord never slows down the web or the bot, and calls WaitDiscord
+	// when shutting down. Tests leave it off. See afterCommit.
 	AsyncDiscord bool
 }
 
@@ -55,30 +55,26 @@ type App struct {
 	calendar gateway.GoogleCalendar
 	spotify  gateway.Spotify
 
-	webURL       string
-	log          *slog.Logger
-	asyncDiscord bool
-	// discordMu serialises Discord work on Esemenyek, so a later message
-	// edit never lands before an earlier one (see esemeny_discord.go).
-	discordMu sync.Mutex
-	// background counts Discord work still running in the background.
-	background sync.WaitGroup
+	webURL string
+	log    *slog.Logger
+	// work runs Discord work after commits (see afterCommit).
+	work *discordWork
 }
 
 // New builds the application core.
 func New(d Deps) *App {
 	a := &App{
-		store:        d.Store,
-		clock:        d.Clock,
-		discord:      d.Discord,
-		calendar:     d.Calendar,
-		spotify:      d.Spotify,
-		webURL:       d.WebURL,
-		log:          d.Log,
-		asyncDiscord: d.AsyncDiscord,
+		store:    d.Store,
+		clock:    d.Clock,
+		discord:  d.Discord,
+		calendar: d.Calendar,
+		spotify:  d.Spotify,
+		webURL:   d.WebURL,
+		log:      d.Log,
 	}
 	if a.log == nil {
 		a.log = slog.New(slog.DiscardHandler)
 	}
+	a.work = newDiscordWork(d.AsyncDiscord, a.log)
 	return a
 }

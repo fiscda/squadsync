@@ -66,14 +66,14 @@ func TestProposingAnEsemenyPostsOneChannelMessageAndAsksTheOtherTagsByDM(t *test
 		if dm.Esemeny != nil {
 			t.Fatalf("DM to %s carries the Esemeny message; with a Csatorna it should only link to it", discordID)
 		}
-		for _, want := range []string{
-			"Új esemény a(z) **Péntek esték** csoportban: **Társasjáték** – válaszolj!",
-			"https://discord.com/channels/guild-1/chan-1/" + p.Ref.MessageID,
-			esemenyURL(e.ID),
-		} {
-			if !strings.Contains(dm.Content, want) {
-				t.Fatalf("DM to %s = %q, want it to contain %q", discordID, dm.Content, want)
-			}
+		want := gateway.VoteRequest{
+			CsoportName:       "Péntek esték",
+			Title:             "Társasjáték",
+			ChannelMessageURL: "https://discord.com/channels/guild-1/chan-1/" + p.Ref.MessageID,
+			WebURL:            esemenyURL(e.ID),
+		}
+		if dm.VoteRequest == nil || *dm.VoteRequest != want {
+			t.Fatalf("DM to %s = %+v, want the vote request %+v", discordID, dm.VoteRequest, want)
 		}
 	}
 	if dms := h.Discord.DMsTo("discord-bela"); len(dms) != 0 {
@@ -84,7 +84,7 @@ func TestProposingAnEsemenyPostsOneChannelMessageAndAsksTheOtherTagsByDM(t *test
 	}
 }
 
-func TestWithoutCsatornaTheAnnouncementGoesByDMWithAnswerButtons(t *testing.T) {
+func TestWithoutCsatornaEveryTagGetsTheAnnouncementByDMWithAnswerButtons(t *testing.T) {
 	h := apptest.New(t)
 	c := csoportOf(t, h, "bela")
 
@@ -93,24 +93,24 @@ func TestWithoutCsatornaTheAnnouncementGoesByDMWithAnswerButtons(t *testing.T) {
 	if posts := h.Discord.Posts(); len(posts) != 0 {
 		t.Fatalf("posts = %+v, want none without a Csatorna", posts)
 	}
-	dms := h.Discord.DMsTo("discord-bela")
-	if len(dms) != 1 || dms[0].Esemeny == nil {
-		t.Fatalf("DMs to Bela = %+v, want one carrying the Esemeny message", dms)
-	}
-	dm := dms[0]
-	if !strings.Contains(dm.Content, "Új esemény a(z) **Péntek esték** csoportban: **Társasjáték** – válaszolj!") {
-		t.Fatalf("DM content = %q", dm.Content)
-	}
-	if dm.Esemeny.EsemenyID != e.ID || len(dm.Esemeny.Idopontok) != 3 {
-		t.Fatalf("DM message = %+v", dm.Esemeny)
-	}
-	for _, i := range dm.Esemeny.Idopontok {
-		if !i.Answerable {
-			t.Fatalf("DM idopont %+v has no answer buttons", i)
+	// The Szervezo too, so they have the message to follow in Discord.
+	for _, discordID := range []string{"discord-anna", "discord-bela"} {
+		dms := h.Discord.DMsTo(discordID)
+		if len(dms) != 1 || dms[0].Esemeny == nil {
+			t.Fatalf("DMs to %s = %+v, want one carrying the Esemeny message", discordID, dms)
 		}
-	}
-	if dms := h.Discord.DMsTo("discord-anna"); len(dms) != 0 {
-		t.Fatalf("the Szervezo got DMs: %+v", dms)
+		dm := dms[0]
+		if dm.VoteRequest == nil || *dm.VoteRequest != (gateway.VoteRequest{CsoportName: "Péntek esték", Title: "Társasjáték"}) {
+			t.Fatalf("DM vote request = %+v", dm.VoteRequest)
+		}
+		if dm.Esemeny.EsemenyID != e.ID || dm.Esemeny.URL != esemenyURL(e.ID) || len(dm.Esemeny.Idopontok) != 3 {
+			t.Fatalf("DM message = %+v", dm.Esemeny)
+		}
+		for _, i := range dm.Esemeny.Idopontok {
+			if !i.Answerable {
+				t.Fatalf("DM idopont %+v has no answer buttons", i)
+			}
+		}
 	}
 }
 
@@ -157,7 +157,8 @@ func TestVisszajelzesEditsEveryAnnouncementDM(t *testing.T) {
 	answer(t, h, "cecil", detail(t, h, "cecil", e.ID), 0, domain.Talan)
 
 	edits := h.Discord.Edits()
-	if len(edits) != len(refs) || len(refs) != 3 {
+	// Anna (Szervezo), Bela, and Cecil on both accounts.
+	if len(edits) != len(refs) || len(refs) != 4 {
 		t.Fatalf("edits = %+v, want one for each of the %d DMs", edits, len(refs))
 	}
 	edited := map[gateway.MessageRef]bool{}
@@ -215,10 +216,11 @@ func TestEsemenyMessageShowsBudapestTimesAndFallsBackToTheWebForMoreThanFiveIdop
 	answer(t, h, "anna", d, 0, domain.Talan)
 	answer(t, h, "bela", d, 2, domain.Igen) // dec. 5.
 
-	m, err := h.App.EsemenyMessage(ctx, "bela", e.ID)
-	if err != nil {
-		t.Fatalf("EsemenyMessage: %v", err)
+	edits := h.Discord.Edits()
+	if len(edits) == 0 {
+		t.Fatal("no message was edited")
 	}
+	m := edits[len(edits)-1].Message
 	if m.HelyszinName != "Kisüzem" || m.HelyszinURL != "https://maps.app.goo.gl/abc" || m.Allapot != "Egyeztetés" || m.SzervezoName != "Anna" {
 		t.Fatalf("message = %+v", m)
 	}
@@ -258,14 +260,30 @@ func TestEsemenyMessageShowsBudapestTimesAndFallsBackToTheWebForMoreThanFiveIdop
 	answer(t, h, "bela", d, 5, domain.Nem)
 }
 
-func TestEsemenyMessageIsOnlyForTags(t *testing.T) {
+func TestLocalhostWebURLIsShownAsTextNotAsALink(t *testing.T) {
 	h := apptest.New(t)
-	c := csoportOf(t, h)
-	addFelhasznalo(t, h, "kivulallo", "Kívülálló")
-	e := propose(t, h, "anna", c.ID, 1)
+	local := app.New(app.Deps{
+		Store: h.Store, Clock: h.Clock, Discord: h.Discord, Calendar: h.Calendar, Spotify: h.Spotify,
+		WebURL: "http://localhost:3000",
+	})
+	c := csoportOf(t, h, "bela")
+	linkCsatorna(t, h, c.ID)
 
-	if _, err := h.App.EsemenyMessage(context.Background(), "kivulallo", e.ID); !errors.Is(err, app.ErrNotFound) {
-		t.Fatalf("EsemenyMessage for a non-Tag: err = %v, want ErrNotFound", err)
+	e, err := local.ProposeEsemeny(context.Background(), "anna", c.ID, app.EsemenyInput{Title: "Helyben", Idopontok: idopontok(6)})
+	if err != nil {
+		t.Fatalf("ProposeEsemeny: %v", err)
+	}
+
+	m := h.Discord.Posts()[0].Message
+	page := "http://localhost:3000/esemenyek/" + e.ID
+	if m.URL != "" || m.WebButton {
+		t.Fatalf("URL %q, WebButton %v; Discord rejects localhost links", m.URL, m.WebButton)
+	}
+	if !strings.Contains(m.Note, "weboldalon") || !strings.Contains(m.Note, page) {
+		t.Fatalf("Note = %q, want the page as text", m.Note)
+	}
+	if dm := h.Discord.DMsTo("discord-bela")[0]; dm.VoteRequest.WebURL != page {
+		t.Fatalf("vote request = %+v, want the page as text", dm.VoteRequest)
 	}
 }
 
@@ -282,12 +300,11 @@ func TestAnnouncementsWaitInTheBackgroundWithAsyncDiscord(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("ProposeEsemeny: %v", err)
 	}
-	done := make(chan struct{})
-	go func() { async.WaitDiscord(); close(done) }()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("WaitDiscord didn't return")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	async.WaitDiscord(ctx)
+	if ctx.Err() != nil {
+		t.Fatal("WaitDiscord ran into its deadline")
 	}
 	if dms := h.Discord.DMsTo("discord-bela"); len(dms) != 1 {
 		t.Fatalf("DMs to Bela = %+v, want the announcement once the background work is done", dms)

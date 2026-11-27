@@ -16,8 +16,17 @@ import (
 // An Esemeny's message: an embed with its details and each Idopont's
 // counts and Helyezes, and a row of igen/talán/nem buttons under each
 // answerable Idopont. The application core decides what it says
-// (gateway.EsemenyMessage); this file only lays it out, for the Messenger
-// and for the reply to a button press.
+// (gateway.EsemenyMessage); this file lays it out for the Messenger and
+// escapes the user-given text, all in one place.
+//
+// # One writer per message
+//
+// Once sent, an Esemeny's message is written only by the core's refresh
+// job, which runs after every change, one job at a time. A button that
+// changes the Esemeny therefore answers with deferredUpdate (acknowledge,
+// change nothing) and never renders the message itself; otherwise its reply
+// could overwrite a newer edit. Future buttons on the Esemeny message must
+// follow the same rule.
 
 // visszajelzesRoute is the route of the answer buttons. Their custom id is
 // CustomID(visszajelzesRoute, esemenyID, idopontID, valasz): with 32-character
@@ -30,6 +39,13 @@ const (
 	visszajelzesNotAnswerable = "Erre az időpontra most nem lehet válaszolni."
 )
 
+// Text of a vote-request DM.
+const (
+	voteRequestFormat = "Új esemény a(z) **%s** csoportban: **%s** – válaszolj!"
+	channelLinkFormat = "\nÜzenet a csatornában: %s"
+	webLinkFormat     = "\nWeboldal: %s"
+)
+
 // Layout of the Esemeny's message.
 const (
 	webButtonLabel    = "Válaszolj a weboldalon"
@@ -40,6 +56,7 @@ const (
 
 	// Discord's limits on an embed.
 	maxEmbedTitleLength       = 256
+	maxEmbedAuthorLength      = 256
 	maxEmbedDescriptionLength = 4096
 	maxEmbedFieldNameLength   = 256
 	maxEmbedFieldValueLength  = 1024
@@ -56,22 +73,58 @@ var valaszButtons = []struct {
 	{domain.Nem, "Nem", discordgo.DangerButton},
 }
 
+// markdownEscaper backslash-escapes everything Discord's markdown reacts to,
+// so user-given names show as typed.
+var markdownEscaper = strings.NewReplacer(
+	`\`, `\\`, `*`, `\*`, `_`, `\_`, "~", `\~`, "`", "\\`", `|`, `\|`,
+	`>`, `\>`, `#`, `\#`, `-`, `\-`, `[`, `\[`, `]`, `\]`, `(`, `\(`, `)`, `\)`,
+)
+
+// escapeMarkdown makes user-given text show literally in Discord.
+func escapeMarkdown(s string) string { return markdownEscaper.Replace(s) }
+
+// field is plain text cut to at most n characters once escaped.
+func field(s string, n int) string {
+	runes := []rune(s)
+	for len(runes) > 0 {
+		e := escapeMarkdown(string(runes))
+		if len([]rune(e)) <= n {
+			return e
+		}
+		runes = runes[:len(runes)-1]
+	}
+	return ""
+}
+
+// voteRequestText words a vote request.
+func voteRequestText(r gateway.VoteRequest) string {
+	s := fmt.Sprintf(voteRequestFormat, escapeMarkdown(r.CsoportName), escapeMarkdown(r.Title))
+	if r.ChannelMessageURL != "" {
+		s += fmt.Sprintf(channelLinkFormat, r.ChannelMessageURL)
+	}
+	if r.WebURL != "" {
+		s += fmt.Sprintf(webLinkFormat, r.WebURL)
+	}
+	return s
+}
+
 // renderEsemeny lays out an Esemeny's message. Components is never nil, so
 // an edit that leaves no buttons removes the old ones.
 func renderEsemeny(m gateway.EsemenyMessage) ([]*discordgo.MessageEmbed, []discordgo.MessageComponent, error) {
 	embed := &discordgo.MessageEmbed{
-		Title:       truncate(m.Title, maxEmbedTitleLength),
+		Title:       field(m.Title, maxEmbedTitleLength),
 		URL:         m.URL,
 		Description: truncate(m.Description, maxEmbedDescriptionLength),
 		Color:       embedColor,
-		Author:      &discordgo.MessageEmbedAuthor{Name: truncate(m.CsoportName, maxEmbedFieldNameLength)},
+		// An author name shows as plain text: no escaping.
+		Author: &discordgo.MessageEmbedAuthor{Name: truncate(m.CsoportName, maxEmbedAuthorLength)},
 		Fields: []*discordgo.MessageEmbedField{
-			{Name: "Szervező", Value: orDash(m.SzervezoName), Inline: true},
+			{Name: "Szervező", Value: orDash(field(m.SzervezoName, maxEmbedFieldValueLength)), Inline: true},
 			{Name: "Állapot", Value: orDash(m.Allapot), Inline: true},
 		},
 	}
 	if h := helyszin(m); h != "" {
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Helyszín", Value: truncate(h, maxEmbedFieldValueLength), Inline: true})
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Helyszín", Value: h, Inline: true})
 	}
 	for n, i := range m.Idopontok {
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
@@ -102,7 +155,7 @@ func renderEsemeny(m gateway.EsemenyMessage) ([]*discordgo.MessageEmbed, []disco
 		}
 		components = append(components, row)
 	}
-	if m.WebButton {
+	if m.WebButton && m.URL != "" {
 		components = append(components, discordgo.ActionsRow{Components: []discordgo.MessageComponent{
 			discordgo.Button{Label: webButtonLabel, Style: discordgo.LinkButton, URL: m.URL},
 		}})
@@ -113,15 +166,23 @@ func renderEsemeny(m gateway.EsemenyMessage) ([]*discordgo.MessageEmbed, []disco
 	return []*discordgo.MessageEmbed{embed}, components, nil
 }
 
+// helyszin shows the Helyszin, its name linked to its Maps URL. A link that
+// wouldn't fit in a field is dropped rather than cut in half.
 func helyszin(m gateway.EsemenyMessage) string {
-	switch {
-	case m.HelyszinURL != "" && m.HelyszinName != "":
-		return fmt.Sprintf("[%s](%s)", escapeLinkText(m.HelyszinName), m.HelyszinURL)
-	case m.HelyszinURL != "":
-		return fmt.Sprintf("[%s](%s)", helyszinMapsOnly, m.HelyszinURL)
-	default:
-		return m.HelyszinName
+	name := escapeMarkdown(m.HelyszinName)
+	if m.HelyszinURL == "" {
+		return field(m.HelyszinName, maxEmbedFieldValueLength)
 	}
+	text := name
+	if text == "" {
+		text = helyszinMapsOnly
+	}
+	// Parentheses would end the link early.
+	link := fmt.Sprintf("[%s](%s)", text, strings.NewReplacer("(", "%28", ")", "%29").Replace(m.HelyszinURL))
+	if len([]rune(link)) <= maxEmbedFieldValueLength {
+		return link
+	}
+	return field(m.HelyszinName, maxEmbedFieldValueLength)
 }
 
 // allas shows an Idopont's counts and Helyezes.
@@ -134,10 +195,6 @@ func allas(i gateway.IdopontLine) string {
 		s += fmt.Sprintf(" · 🏆 %d. hely", i.Helyezes)
 	}
 	return s
-}
-
-func escapeLinkText(s string) string {
-	return strings.NewReplacer("[", "(", "]", ")").Replace(s)
 }
 
 func orDash(s string) string {
@@ -156,8 +213,9 @@ func truncate(s string, n int) string {
 	return string(r[:n-1]) + "…"
 }
 
-// answerButton records the Visszajelzes of an answer button and updates the
-// message it is on.
+// answerButton records the Visszajelzes of an answer button. It only
+// acknowledges the press: the core's refresh job updates the message (see
+// "One writer per message" above).
 func (r *Router) answerButton(ctx context.Context, req Request) (Reply, error) {
 	if len(req.Args) != 3 {
 		return ephemeral(unknownCommand), nil
@@ -174,28 +232,18 @@ func (r *Router) answerButton(ctx context.Context, req Request) (Reply, error) {
 	case err != nil:
 		return Reply{}, err
 	}
+	return deferredUpdate(), nil
+}
 
-	m, err := r.app.EsemenyMessage(ctx, req.Felhasznalo.ID, esemenyID)
-	if err != nil {
-		return Reply{}, err
-	}
-	embeds, components, err := renderEsemeny(m)
-	if err != nil {
-		return Reply{}, err
-	}
-	data := &discordgo.InteractionResponseData{
-		Embeds:          embeds,
-		Components:      components,
-		AllowedMentions: &discordgo.MessageAllowedMentions{},
-	}
-	// An update replaces the content too: keep a DM's text above the embed.
-	if req.Interaction.Message != nil {
-		data.Content = req.Interaction.Message.Content
-	}
-	return Reply{Response: &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseUpdateMessage,
-		Data: data,
-	}}, nil
+// deferredUpdate acknowledges a button press without changing its message,
+// and without anything to follow up.
+func deferredUpdate() Reply {
+	return Reply{Response: &discordgo.InteractionResponse{Type: discordgo.InteractionResponseDeferredMessageUpdate}}
+}
+
+// SendVoteRequestDM implements gateway.DiscordMessenger.
+func (m Messenger) SendVoteRequestDM(ctx context.Context, discordID string, r gateway.VoteRequest) error {
+	return m.SendDM(ctx, discordID, voteRequestText(r))
 }
 
 // PostEsemenyMessage implements gateway.DiscordMessenger.
@@ -204,12 +252,12 @@ func (m Messenger) PostEsemenyMessage(ctx context.Context, channelID string, msg
 }
 
 // SendEsemenyDM implements gateway.DiscordMessenger.
-func (m Messenger) SendEsemenyDM(ctx context.Context, discordID, content string, msg gateway.EsemenyMessage) (gateway.MessageRef, error) {
+func (m Messenger) SendEsemenyDM(ctx context.Context, discordID string, r gateway.VoteRequest, msg gateway.EsemenyMessage) (gateway.MessageRef, error) {
 	ch, err := m.Session.UserChannelCreate(discordID, discordgo.WithContext(ctx))
 	if err != nil {
 		return gateway.MessageRef{}, fmt.Errorf("open dm channel: %w", err)
 	}
-	return m.sendEsemeny(ctx, ch.ID, content, msg)
+	return m.sendEsemeny(ctx, ch.ID, voteRequestText(r), msg)
 }
 
 func (m Messenger) sendEsemeny(ctx context.Context, channelID, content string, msg gateway.EsemenyMessage) (gateway.MessageRef, error) {

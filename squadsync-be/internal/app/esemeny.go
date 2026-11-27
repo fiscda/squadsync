@@ -14,7 +14,10 @@ import (
 	"squadsync-be/internal/store"
 )
 
-// Limits on what an Esemeny holds.
+// Limits on what an Esemeny holds. They also keep its Discord message
+// within Discord's 6000-character total for an embed: a 100-character title,
+// a 2000-character description, a 200-character Helyszin and 20 Idopont
+// fields of about 100 characters each stay well under it.
 const (
 	MaxEsemenyTitleLength       = 100
 	MaxEsemenyDescriptionLength = 2000
@@ -396,7 +399,9 @@ func (a *App) SetVisszajelzes(ctx context.Context, felhasznaloID, esemenyID, ido
 }
 
 // answerable tells whether the Idopont of the Esemeny takes Visszajelzesek
-// now. The Discord message shows answer buttons on exactly these.
+// now. It is the one seam for this rule: SetVisszajelzes refuses the others,
+// and the Discord message shows answer buttons on exactly these. #8 changes
+// it so that after confirmation only the confirmed Idopont is answerable.
 func answerable(e domain.Esemeny, _ domain.Idopont) bool {
 	return e.Allapot == domain.Egyeztetes
 }
