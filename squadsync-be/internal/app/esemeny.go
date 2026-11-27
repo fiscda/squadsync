@@ -92,6 +92,9 @@ type EsemenyDetail struct {
 	// Resztvevok are ordered by name; empty unless the Esemeny is
 	// Veglegesitve or Lezajlott (see resztvevokOf).
 	Resztvevok []domain.Resztvevo
+	// Kiegeszitok are every Kiegeszito that exists, in display order, with
+	// whether it is on. Set by Esemeny only.
+	Kiegeszitok []KiegeszitoAllapot
 }
 
 // IdopontAllas is an Idopont with how it stands: its counts and Helyezes
@@ -307,7 +310,12 @@ func (a *App) Esemeny(ctx context.Context, felhasznaloID, esemenyID string) (Ese
 	if err != nil {
 		return EsemenyDetail{}, err
 	}
-	return esemenyDetail(ctx, q, e, felhasznaloID)
+	d, err := esemenyDetail(ctx, q, e, felhasznaloID)
+	if err != nil {
+		return EsemenyDetail{}, err
+	}
+	d.Kiegeszitok, err = a.kiegeszitoAllapotok(ctx, q, e)
+	return d, err
 }
 
 // esemenyDetail reads what the Esemeny's page shows to viewerID ("" for
@@ -403,6 +411,7 @@ func (a *App) SetVisszajelzes(ctx context.Context, felhasznaloID, esemenyID, ido
 	}
 	var dropOut *gateway.DropOut
 	var szervezoID, csoportID string
+	var released []kiegeszitoJob
 	err := a.store.InTx(ctx, func(q store.Queries) error {
 		e, err := requireEsemenyTag(ctx, q, esemenyID, felhasznaloID)
 		if err != nil {
@@ -434,14 +443,19 @@ func (a *App) SetVisszajelzes(ctx context.Context, felhasznaloID, esemenyID, ido
 		if !droppedOut {
 			return nil
 		}
-		// #16 releases the drop-out's claims here, in this transaction, the
-		// Szervezo's own included, and #24 removes their calendar event.
-		// (Joining, for #24, is makesResztvevo(e, i, valasz) &&
-		// !makesResztvevo(e, i, before).)
+		// The drop-out's claims in every Kiegeszito are released here, in
+		// this transaction, the Szervezo's own included. #24 removes their
+		// calendar event here too. (Joining, for #24, is
+		// makesResztvevo(e, i, valasz) && !makesResztvevo(e, i, before).)
+		freed, after, err := a.releaseDropOut(ctx, q, e, felhasznaloID)
+		if err != nil {
+			return err
+		}
+		released = after
 
 		// The Szervezo dropping out needs no DM to themselves.
 		if felhasznaloID != e.SzervezoID {
-			d, err := a.dropOut(ctx, q, e, felhasznaloID)
+			d, err := a.dropOut(ctx, q, e, felhasznaloID, freed)
 			if err != nil {
 				return err
 			}
@@ -453,6 +467,7 @@ func (a *App) SetVisszajelzes(ctx context.Context, felhasznaloID, esemenyID, ido
 		return err
 	}
 	a.afterCommit(func(ctx context.Context) {
+		a.runKiegeszitoJobs(ctx, released)
 		a.refreshEsemenyMessages(ctx, esemenyID)
 		if dropOut != nil {
 			a.sendDropOutDM(ctx, csoportID, szervezoID, *dropOut)

@@ -53,6 +53,7 @@ const (
 	detailFormat       = " – %s"
 	linkFormat         = "\n%s"
 	dropOutFormat      = "%s már nem jön: **%s**"
+	felszabadultFormat = "\nFelszabadult: %s"
 )
 
 // Layout of the Esemeny's message.
@@ -61,6 +62,7 @@ const (
 	noVisszajelzesYet = "Még senki nem válaszolt."
 	confirmedMark     = "✅ "
 	resztvevokName    = "Résztvevők (%d)"
+	kiegeszitokName   = "Kiegészítők"
 	noResztvevo       = "Még senki."
 	helyszinMapsOnly  = "Térkép"
 	numberSeparator   = " · "
@@ -136,10 +138,13 @@ func announcementText(a gateway.Announcement, inDM bool) string {
 	return s
 }
 
-// dropOutText words the Szervezo's drop-out DM. #16 adds what was freed.
+// dropOutText words the Szervezo's drop-out DM, with what was freed.
 func dropOutText(d gateway.DropOut) string {
 	s := fmt.Sprintf(dropOutFormat, escapeMarkdown(d.Name), escapeMarkdown(d.Title))
 	s += fmt.Sprintf(csoportFormat, escapeMarkdown(d.CsoportName))
+	if d.Felszabadult != "" {
+		s += fmt.Sprintf(felszabadultFormat, escapeMarkdown(d.Felszabadult))
+	}
 	if d.Link != "" {
 		s += fmt.Sprintf(linkFormat, d.Link)
 	}
@@ -180,6 +185,12 @@ func renderEsemeny(m gateway.EsemenyMessage) ([]*discordgo.MessageEmbed, []disco
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
 			Name:  fmt.Sprintf(resztvevokName, len(m.Resztvevok)),
 			Value: resztvevok(m.Resztvevok),
+		})
+	}
+	if m.KiegeszitoSummary != "" {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:  kiegeszitokName,
+			Value: field(m.KiegeszitoSummary, maxEmbedFieldValueLength),
 		})
 	}
 	if m.Note != "" {
