@@ -310,3 +310,27 @@ func TestAnnouncementsWaitInTheBackgroundWithAsyncDiscord(t *testing.T) {
 		t.Fatalf("DMs to Bela = %+v, want the announcement once the background work is done", dms)
 	}
 }
+
+func TestEsemenyMessageShowsHowManyTagsAreSzabadOnTheIdopontDays(t *testing.T) {
+	h := apptest.New(t)
+	c := csoportOf(t, h, "bela", "cecil")
+	linkCsatorna(t, h, c.ID)
+	// The first Idopont is on 1 December, the second on 2 December.
+	mark(t, h, "anna", "2026-12-01", "2026-12-02", domain.Szabad)
+	mark(t, h, "bela", "2026-12-01", "2026-12-01", domain.Szabad)
+	mark(t, h, "cecil", "2026-12-02", "2026-12-02", domain.Foglalt)
+
+	e := propose(t, h, "bela", c.ID, 2)
+
+	lines := h.Discord.Posts()[0].Message.Idopontok
+	if lines[0].Szabad != 2 || lines[0].Osszes != 3 || lines[1].Szabad != 1 || lines[1].Osszes != 3 {
+		t.Fatalf("posted lines = %+v, want 2/3 and 1/3", lines)
+	}
+
+	// A change of Raeres edits the message, so the counts stay current.
+	mark(t, h, "cecil", "2026-12-01", "2026-12-01", domain.Szabad)
+	edits := h.Discord.Edits()
+	if len(edits) != 1 || edits[0].Message.EsemenyID != e.ID || edits[0].Message.Idopontok[0].Szabad != 3 || edits[0].Message.Idopontok[0].Osszes != 3 {
+		t.Fatalf("edits = %+v, want the first Idopont at 3/3", edits)
+	}
+}

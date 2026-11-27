@@ -18,6 +18,9 @@ export default function FiokPage({ searchParams }: PageProps<"/fiok">) {
           ← Főoldal
         </Link>
         <h1 className="text-3xl font-semibold tracking-tight">Fiókom</h1>
+        <Link href="/raeres" className={`${linkClass} text-sm`}>
+          Ráérésem megadása →
+        </Link>
       </div>
       <Suspense fallback={<p className="text-zinc-500">Betöltés…</p>}>
         {searchParams.then(({ kapcsolas }) => (

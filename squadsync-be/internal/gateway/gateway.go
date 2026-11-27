@@ -138,6 +138,12 @@ type IdopontLine struct {
 	Answerable bool
 	// Confirmed marks the Esemeny's confirmed Idopont.
 	Confirmed bool
+	// Szabad is how many Tags are szabad on every day it covers, out of
+	// Osszes Tags (their Raeres).
+	Szabad, Osszes int
+	// NincsRaeres means none of its days can have a Raeres (they are past
+	// or beyond the window): show "–" instead of the counts.
+	NincsRaeres bool
 }
 
 // DiscordIdentity is the Discord account behind an OAuth authorization.

@@ -517,6 +517,105 @@ export async function nullOnNotFound<T>(call: Promise<T>): Promise<T | null> {
   }
 }
 
+// --- Ráérés ---
+
+/** A day is szabad or foglalt; an unmarked day is unknown and has no entry. */
+export type RaeresAllapot = "szabad" | "foglalt";
+
+/** One marked day of the caller's own Ráérés. */
+export type RaeresDay = {
+  /** A Budapest date, like "2026-12-05". */
+  day: string;
+  allapot: RaeresAllapot;
+};
+
+/** One day of a Csoport's heatmap: how many of its Tags are szabad. */
+export type HeatmapDay = {
+  /** A Budapest date, like "2026-12-05". */
+  day: string;
+  szabad: number;
+  /** How many Tags the Csoport has. */
+  osszes: number;
+};
+
+/** How the Tags' (and the caller's) Ráérés stands on one Időpont's days. */
+export type IdopontRaeres = {
+  idopontId: string;
+  /** Tags szabad on every day the Időpont covers, out of osszes Tags. */
+  szabad: number;
+  osszes: number;
+  /**
+   * None of the Időpont's days lies in the window (past or too far ahead),
+   * so show "–" instead of szabad/osszes.
+   */
+  nincsRaeres: boolean;
+  /** The caller's own Ráérés over those days; null when unknown or mixed. */
+  sajat: RaeresAllapot | null;
+};
+
+/**
+ * The caller's marked days from..to (Budapest dates, both included). Go cuts
+ * the range to the window: today through 365 days later.
+ */
+export function getRaeres(
+  felhasznaloId: string,
+  from: string,
+  to: string,
+): Promise<RaeresDay[]> {
+  return callBackend(
+    felhasznaloId,
+    "GET",
+    `/raeres?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+  );
+}
+
+/**
+ * Marks the days from..to (both included) as szabad or foglalt, or clears
+ * them with "". Go answers 400 for days outside the window.
+ */
+export async function setRaeres(
+  felhasznaloId: string,
+  from: string,
+  to: string,
+  allapot: RaeresAllapot | "",
+): Promise<void> {
+  await callBackend<void>(felhasznaloId, "PUT", "/raeres", {
+    from,
+    to,
+    allapot,
+  });
+}
+
+/** A Csoport's per-day count of free Tags. Null when the caller isn't a Tag. */
+export function getCsoportHeatmap(
+  felhasznaloId: string,
+  csoportId: string,
+  from: string,
+  to: string,
+): Promise<HeatmapDay[] | null> {
+  return nullOnNotFound(
+    callBackend(
+      felhasznaloId,
+      "GET",
+      `/csoport/${encodeURIComponent(csoportId)}/raeres?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+    ),
+  );
+}
+
+/** "X/Y szabad aznap" for each Időpont, in chronological order. Null for a non-Tag. */
+export function getEsemenyRaeres(
+  felhasznaloId: string,
+  esemenyId: string,
+): Promise<IdopontRaeres[] | null> {
+  return nullOnNotFound(
+    callBackend(
+      felhasznaloId,
+      "GET",
+      `/esemeny/${encodeURIComponent(esemenyId)}/raeres`,
+    ),
+  );
+}
+
 // --- Esemény, Időpont and Visszajelzés ---
 
 /** Egyeztetés → Véglegesítve → Lezajlott, or Elmaradt. */

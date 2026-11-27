@@ -20,6 +20,7 @@ import {
 import { CancelEsemeny } from "./cancel-esemeny";
 import { kiegeszitoHibaText } from "./kiegeszitok/registry";
 import { KiegeszitokSection } from "./kiegeszitok/section";
+import { IdopontRaeresLine } from "./raeres-line";
 
 export default function EsemenyPage({
   params,
@@ -254,6 +255,11 @@ function IdopontCard({
           {idopont.helyezes === null ? "–" : `${idopont.helyezes}.`}
         </span>
       </div>
+      <IdopontRaeresLine
+        esemenyId={esemenyId}
+        idopontId={idopont.id}
+        answerable={idopont.answerable}
+      />
       <p className="text-sm text-zinc-600 dark:text-zinc-400">
         Igen: {idopont.igen} · Talán: {idopont.talan} · Nem: {idopont.nem}
       </p>

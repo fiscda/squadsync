@@ -38,7 +38,7 @@ Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. Domain terms are
 - **Off limits:** never touch Better Auth's tables (`user`, `session`, `account`, `verification`).
 
 **Frontend (`squadsync-fe/src/`)**
-- **Calling Go:** only from server code, through `lib/backend.ts`. Keep its types in sync with Go by hand.
+- **Calling Go:** only from server code, through `lib/backend.ts` (`callBackend`). Each Kiegészítő keeps its own calls in `lib/kiegeszito/<kind>.ts`, built on the exported `callBackend`. Keep the types in sync with Go by hand.
 - **Reads and writes:** reads are side-effect free and wrapped in React `cache()`. Writes happen only in server actions or route handlers, never while rendering.
 - **Next.js 16:** check `squadsync-fe/node_modules/next/dist/docs/` for anything to do with `cacheComponents`, Suspense or route handlers. In route handlers, `unstable_rethrow` is needed inside `catch` blocks.
 
