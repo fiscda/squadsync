@@ -98,6 +98,9 @@ async function Greeting() {
       <Link href="/csoportok" className={buttonClass}>
         Csoportjaim
       </Link>
+      <Link href="/raeres" className={secondaryButtonClass}>
+        Ráérésem
+      </Link>
       <Link href="/fiok" className={secondaryButtonClass}>
         Fiókom
       </Link>

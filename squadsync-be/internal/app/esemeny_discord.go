@@ -60,7 +60,13 @@ func (a *App) esemenyMessage(ctx context.Context, q store.Queries, e domain.Esem
 	now := a.clock.Now()
 	answerableCount := 0
 	for n, allas := range d.Idopontok {
+		szabad, osszes, err := szabadAznap(ctx, q, e.CsoportID, allas.Idopont)
+		if err != nil {
+			return gateway.EsemenyMessage{}, err
+		}
 		line := gateway.IdopontLine{
+			Szabad:     szabad,
+			Osszes:     osszes,
 			ID:         allas.ID,
 			Label:      idopontLabel(allas.Idopont, now),
 			Igen:       allas.Igen,

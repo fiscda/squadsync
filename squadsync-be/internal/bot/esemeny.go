@@ -129,7 +129,7 @@ func renderEsemeny(m gateway.EsemenyMessage) ([]*discordgo.MessageEmbed, []disco
 	for n, i := range m.Idopontok {
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
 			Name:  truncate(fmt.Sprintf("%d%s%s", n+1, numberSeparator, i.Label), maxEmbedFieldNameLength),
-			Value: allas(i),
+			Value: allas(i) + "\n" + szabadAznap(i),
 		})
 	}
 	if m.Note != "" {

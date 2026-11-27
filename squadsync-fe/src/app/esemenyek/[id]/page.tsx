@@ -11,6 +11,7 @@ import {
   formatIdopont,
   valaszLabel,
 } from "../format";
+import { IdopontRaeresLine } from "./raeres-line";
 
 export default function EsemenyPage({ params }: PageProps<"/esemenyek/[id]">) {
   return (
@@ -123,6 +124,11 @@ function IdopontCard({
           {idopont.helyezes === null ? "–" : `${idopont.helyezes}.`}
         </span>
       </div>
+      <IdopontRaeresLine
+        esemenyId={esemenyId}
+        idopontId={idopont.id}
+        answerable={answerable}
+      />
       <p className="text-sm text-zinc-600 dark:text-zinc-400">
         Igen: {idopont.igen} · Talán: {idopont.talan} · Nem: {idopont.nem}
       </p>

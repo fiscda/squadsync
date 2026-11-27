@@ -91,6 +91,9 @@ type IdopontLine struct {
 	Helyezes int
 	// Answerable asks for igen/talán/nem buttons on it.
 	Answerable bool
+	// Szabad is how many Tags are szabad on every day it covers, out of
+	// Osszes Tags (their Raeres).
+	Szabad, Osszes int
 }
 
 // DiscordIdentity is the Discord account behind an OAuth authorization.
