@@ -19,5 +19,8 @@ type DiscordAccount struct {
 	DiscordID     string
 	FelhasznaloID string
 	IsMain        bool
-	CreatedAt     time.Time
+	// Name is the account's Discord name when it was recorded, for display.
+	// It may be empty.
+	Name      string
+	CreatedAt time.Time
 }

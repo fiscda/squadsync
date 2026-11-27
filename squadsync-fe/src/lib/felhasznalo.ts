@@ -76,11 +76,13 @@ export async function requireFelhasznalo(): Promise<Felhasznalo> {
 /**
  * Starts the Discord login and returns the Discord URL to send the browser
  * to. After Discord, Better Auth redirects to callbackURL, which must be a
- * path on this site.
+ * path on this site. A refused login (such as one with a linked Discord
+ * account) goes to the home page instead, with `?error=` and
+ * `&error_description=`, which the home page shows.
  */
 export async function discordLoginUrl(callbackURL: string): Promise<string> {
   const { url } = await auth.api.signInSocial({
-    body: { provider: "discord", callbackURL },
+    body: { provider: "discord", callbackURL, errorCallbackURL: "/" },
     headers: await headers(),
   });
   if (!url) {

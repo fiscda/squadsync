@@ -18,7 +18,7 @@ help:
 	@echo "make install  install frontend dependencies"
 	@echo "make migrate  migrate the SQLite file (Go tables, then Better Auth tables)"
 	@echo "make dev      migrate, then run Go (127.0.0.1:$(BACKEND_PORT)) and Next.js (localhost:3000)"
-	@echo "make test     run the Go tests"
+	@echo "make test     run the Go tests and the frontend tests"
 	@echo "make lint     lint and type-check the frontend"
 
 install:
@@ -44,6 +44,7 @@ dev: migrate
 
 test:
 	cd squadsync-be && go test ./...
+	cd squadsync-fe && bun test
 
 lint:
 	cd squadsync-fe && bun run lint && bunx next typegen && bunx tsc --noEmit

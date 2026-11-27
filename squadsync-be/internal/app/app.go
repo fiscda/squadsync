@@ -33,9 +33,12 @@ type Deps struct {
 	Discord  gateway.DiscordMessenger
 	Calendar gateway.GoogleCalendar
 	Spotify  gateway.Spotify
+	// DiscordOAuth identifies Discord accounts being linked (ADR-0002).
+	DiscordOAuth gateway.DiscordOAuth
 
 	// WebURL is the public URL of the web app, for links in Discord
-	// messages.
+	// messages and the redirect URI of linking (LinkRedirectURI). Empty
+	// disables linking.
 	WebURL string
 	// Log receives failures that don't fail a use case, such as Discord
 	// being down. Optional.
@@ -55,8 +58,9 @@ type App struct {
 	calendar gateway.GoogleCalendar
 	spotify  gateway.Spotify
 
-	webURL string
-	log    *slog.Logger
+	discordOAuth gateway.DiscordOAuth
+	webURL       string
+	log          *slog.Logger
 	// work runs Discord work after commits (see afterCommit).
 	work *discordWork
 }
@@ -64,13 +68,14 @@ type App struct {
 // New builds the application core.
 func New(d Deps) *App {
 	a := &App{
-		store:    d.Store,
-		clock:    d.Clock,
-		discord:  d.Discord,
-		calendar: d.Calendar,
-		spotify:  d.Spotify,
-		webURL:   d.WebURL,
-		log:      d.Log,
+		store:        d.Store,
+		clock:        d.Clock,
+		discord:      d.Discord,
+		calendar:     d.Calendar,
+		spotify:      d.Spotify,
+		discordOAuth: d.DiscordOAuth,
+		webURL:       d.WebURL,
+		log:          d.Log,
 	}
 	if a.log == nil {
 		a.log = slog.New(slog.DiscardHandler)
