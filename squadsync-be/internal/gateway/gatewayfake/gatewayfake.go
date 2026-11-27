@@ -26,6 +26,10 @@ type DM struct {
 	Announcement *gateway.Announcement
 	// DropOut is set for a drop-out DM to the Szervezo.
 	DropOut *gateway.DropOut
+	// Emlekezteto is set for a reminder of a confirmed Esemeny.
+	Emlekezteto *gateway.Emlekezteto
+	// Hatarido is set for the Szervezo's DM when the voting Hatarido passed.
+	Hatarido *gateway.HataridoDM
 }
 
 // AnnouncementPost is one announcement posted in a channel.
@@ -163,6 +167,28 @@ func (d *Discord) SendDropOutDM(_ context.Context, discordID string, o gateway.D
 		return d.fail
 	}
 	d.dms = append(d.dms, DM{DiscordID: discordID, DropOut: &o})
+	return nil
+}
+
+// SendEmlekeztetoDM records the message.
+func (d *Discord) SendEmlekeztetoDM(_ context.Context, discordID string, e gateway.Emlekezteto) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.fail != nil {
+		return d.fail
+	}
+	d.dms = append(d.dms, DM{DiscordID: discordID, Emlekezteto: &e})
+	return nil
+}
+
+// SendHataridoDM records the message.
+func (d *Discord) SendHataridoDM(_ context.Context, discordID string, h gateway.HataridoDM) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.fail != nil {
+		return d.fail
+	}
+	d.dms = append(d.dms, DM{DiscordID: discordID, Hatarido: &h})
 	return nil
 }
 

@@ -44,6 +44,7 @@ func New(a *app.App, secret string, log *slog.Logger) http.Handler {
 	s.registerKiegeszito(mux)
 	s.registerFelszereles(mux)
 	s.registerRaeres(mux)
+	s.registerIdozites(mux)
 
 	return requireSecret(secret, mux)
 }

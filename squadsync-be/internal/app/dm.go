@@ -89,6 +89,28 @@ func (a *App) sendDropOutDM(ctx context.Context, csoportID, szervezoID string, d
 	}
 }
 
+// sendEmlekeztetoDM sends an Emlekezteto of an Esemeny of the Csoport to
+// every Discord account of the Felhasznalo.
+func (a *App) sendEmlekeztetoDM(ctx context.Context, csoportID, felhasznaloID string, e gateway.Emlekezteto) {
+	for _, discordID := range a.dmAccounts(ctx, csoportID, felhasznaloID) {
+		cctx, cancel := context.WithTimeout(ctx, discordCallTimeout)
+		err := a.discord.SendEmlekeztetoDM(cctx, discordID, e)
+		cancel()
+		a.logDiscordError("send emlekezteto dm", err, "felhasznalo", felhasznaloID, "discord_id", discordID)
+	}
+}
+
+// sendHataridoDM tells the Szervezo of an Esemeny of the Csoport, on every
+// Discord account, that its voting Hatarido passed.
+func (a *App) sendHataridoDM(ctx context.Context, csoportID, szervezoID string, h gateway.HataridoDM) {
+	for _, discordID := range a.dmAccounts(ctx, csoportID, szervezoID) {
+		cctx, cancel := context.WithTimeout(ctx, discordCallTimeout)
+		err := a.discord.SendHataridoDM(cctx, discordID, h)
+		cancel()
+		a.logDiscordError("send hatarido dm", err, "felhasznalo", szervezoID, "discord_id", discordID, "esemeny", h.EsemenyID)
+	}
+}
+
 // logDiscordError logs a failed Discord call, if err is set. Without a bot
 // token every call fails with ErrNotConfigured, which isn't worth an error.
 func (a *App) logDiscordError(what string, err error, args ...any) {

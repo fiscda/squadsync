@@ -62,6 +62,9 @@ type csoportDetailJSON struct {
 	Tags  []tagJSON `json:"tags"`
 	// Csatorna is the linked Discord channel, or null.
 	Csatorna *csatornaJSON `json:"csatorna"`
+	// EmlekeztetoPercek are the Emlekezteto offsets in minutes before the
+	// start, longest first.
+	EmlekeztetoPercek []int `json:"emlekeztetoPercek"`
 }
 
 type csatornaJSON struct {
@@ -130,7 +133,7 @@ func (s *server) getCsoport(w http.ResponseWriter, r *http.Request, felhasznaloI
 	for _, t := range d.Tags {
 		tags = append(tags, tagJSON{FelhasznaloID: t.FelhasznaloID, Name: t.FelhasznaloName, Admin: t.Admin, CreatedAt: t.CreatedAt})
 	}
-	out := csoportDetailJSON{csoportJSON: toCsoportJSON(d.Csoport), Admin: d.Admin, Muted: d.Muted, Tags: tags}
+	out := csoportDetailJSON{csoportJSON: toCsoportJSON(d.Csoport), Admin: d.Admin, Muted: d.Muted, Tags: tags, EmlekeztetoPercek: percek(d.Emlekeztetok)}
 	if c := d.Csatorna; c != nil {
 		out.Csatorna = &csatornaJSON{GuildID: c.GuildID, ChannelID: c.ChannelID, ChannelName: c.ChannelName, LinkedAt: c.LinkedAt}
 	}
