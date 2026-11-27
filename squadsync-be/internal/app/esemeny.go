@@ -1,0 +1,343 @@
+package app
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/url"
+	"strings"
+	"time"
+	_ "time/tzdata" // Europe/Budapest must load even without system zone data
+	"unicode/utf8"
+
+	"squadsync-be/internal/domain"
+	"squadsync-be/internal/store"
+)
+
+// Limits on what an Esemeny holds.
+const (
+	MaxEsemenyTitleLength       = 100
+	MaxEsemenyDescriptionLength = 2000
+	MaxHelyszinNameLength       = 200
+	MaxHelyszinURLLength        = 2000
+	MaxIdopontok                = 20
+)
+
+// LocalTimeLayout is how Idopont times arrive from the entry points: a wall
+// clock time in Europe/Budapest, to the minute.
+const LocalTimeLayout = "2006-01-02T15:04"
+
+// Budapest is the one time zone of the app. Times are stored in UTC and
+// shown in Budapest time; there are no per-user time zones.
+var Budapest = mustLoadLocation("Europe/Budapest")
+
+// ErrNotInEgyeztetes means the Esemeny isn't in Egyeztetes, so its
+// Idopontok can't be answered (yet or any more).
+var ErrNotInEgyeztetes = errors.New("esemeny is not in egyeztetes")
+
+// EsemenyInput is a proposed Esemeny.
+type EsemenyInput struct {
+	Title       string
+	Description string
+	Helyszin    domain.Helyszin
+	Idopontok   []IdopontInput
+}
+
+// IdopontInput is one candidate time, as Budapest wall clock times in
+// LocalTimeLayout. End is optional ("" for none) and must be after Start; it
+// may be days later.
+type IdopontInput struct {
+	Start string
+	End   string
+}
+
+// EsemenyDetail is an Esemeny as one of its Csoport's Tags sees it.
+type EsemenyDetail struct {
+	domain.Esemeny
+	CsoportName  string
+	SzervezoName string
+	// Idopontok are in chronological order.
+	Idopontok []IdopontAllas
+}
+
+// IdopontAllas is an Idopont with how it stands: its counts and Helyezes
+// (both counting only Tags' Visszajelzesek), the viewer's own answer, and
+// every Visszajelzes on it.
+type IdopontAllas struct {
+	domain.Idopont
+	Igen, Talan, Nem int
+	// Helyezes is 0 when no Tag has answered the Idopont.
+	Helyezes Helyezes
+	// Sajat is the viewer's own Visszajelzes, "" if they haven't answered.
+	Sajat domain.Valasz
+	// Visszajelzesek are ordered by name.
+	Visszajelzesek []domain.VisszajelzesOfEsemeny
+}
+
+// ProposeEsemeny creates an Esemeny in the Csoport with its Idopontok. The
+// proposer becomes its Szervezo and it starts in Egyeztetes. Only Tags may
+// propose; anyone else gets ErrNotFound. Malformed input gives
+// ErrInvalidInput.
+func (a *App) ProposeEsemeny(ctx context.Context, felhasznaloID, csoportID string, in EsemenyInput) (domain.Esemeny, error) {
+	e, idopontok, err := a.newEsemeny(felhasznaloID, csoportID, in)
+	if err != nil {
+		return domain.Esemeny{}, err
+	}
+	err = a.store.InTx(ctx, func(q store.Queries) error {
+		if _, err := requireTag(ctx, q, csoportID, felhasznaloID); err != nil {
+			return err
+		}
+		if err := q.InsertEsemeny(ctx, e); err != nil {
+			return err
+		}
+		for _, i := range idopontok {
+			if err := q.InsertIdopont(ctx, i); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return domain.Esemeny{}, err
+	}
+	return e, nil
+}
+
+// newEsemeny validates a proposal and builds its rows.
+func (a *App) newEsemeny(felhasznaloID, csoportID string, in EsemenyInput) (domain.Esemeny, []domain.Idopont, error) {
+	title := strings.TrimSpace(in.Title)
+	if title == "" {
+		return domain.Esemeny{}, nil, fmt.Errorf("%w: an esemeny needs a title", ErrInvalidInput)
+	}
+	if utf8.RuneCountInString(title) > MaxEsemenyTitleLength {
+		return domain.Esemeny{}, nil, fmt.Errorf("%w: a title is at most %d characters", ErrInvalidInput, MaxEsemenyTitleLength)
+	}
+	description := strings.TrimSpace(in.Description)
+	if utf8.RuneCountInString(description) > MaxEsemenyDescriptionLength {
+		return domain.Esemeny{}, nil, fmt.Errorf("%w: a description is at most %d characters", ErrInvalidInput, MaxEsemenyDescriptionLength)
+	}
+	helyszin, err := validHelyszin(in.Helyszin)
+	if err != nil {
+		return domain.Esemeny{}, nil, err
+	}
+	if len(in.Idopontok) == 0 {
+		return domain.Esemeny{}, nil, fmt.Errorf("%w: an esemeny needs at least one idopont", ErrInvalidInput)
+	}
+	if len(in.Idopontok) > MaxIdopontok {
+		return domain.Esemeny{}, nil, fmt.Errorf("%w: an esemeny has at most %d idopontok", ErrInvalidInput, MaxIdopontok)
+	}
+
+	now := a.clock.Now()
+	e := domain.Esemeny{
+		ID:          randomID(),
+		CsoportID:   csoportID,
+		Title:       title,
+		Description: description,
+		Helyszin:    helyszin,
+		SzervezoID:  felhasznaloID,
+		Allapot:     domain.Egyeztetes,
+		CreatedAt:   now,
+	}
+	idopontok := make([]domain.Idopont, 0, len(in.Idopontok))
+	for n, input := range in.Idopontok {
+		i, err := newIdopont(input)
+		if err != nil {
+			return domain.Esemeny{}, nil, fmt.Errorf("idopont %d: %w", n+1, err)
+		}
+		i.ID = randomID()
+		i.EsemenyID = e.ID
+		i.AddedBy = felhasznaloID
+		i.CreatedAt = now
+		idopontok = append(idopontok, i)
+	}
+	return e, idopontok, nil
+}
+
+func validHelyszin(h domain.Helyszin) (domain.Helyszin, error) {
+	h.Name = strings.TrimSpace(h.Name)
+	h.URL = strings.TrimSpace(h.URL)
+	if utf8.RuneCountInString(h.Name) > MaxHelyszinNameLength {
+		return domain.Helyszin{}, fmt.Errorf("%w: a helyszin name is at most %d characters", ErrInvalidInput, MaxHelyszinNameLength)
+	}
+	if h.URL == "" {
+		return h, nil
+	}
+	if len(h.URL) > MaxHelyszinURLLength {
+		return domain.Helyszin{}, fmt.Errorf("%w: a helyszin URL is at most %d characters", ErrInvalidInput, MaxHelyszinURLLength)
+	}
+	u, err := url.Parse(h.URL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return domain.Helyszin{}, fmt.Errorf("%w: the helyszin URL must be an absolute http or https URL", ErrInvalidInput)
+	}
+	return h, nil
+}
+
+// newIdopont converts an Idopont's Budapest wall clock times to UTC.
+func newIdopont(in IdopontInput) (domain.Idopont, error) {
+	start, err := parseLocalTime(in.Start)
+	if err != nil {
+		return domain.Idopont{}, err
+	}
+	i := domain.Idopont{Start: start}
+	if strings.TrimSpace(in.End) == "" {
+		return i, nil
+	}
+	end, err := parseLocalTime(in.End)
+	if err != nil {
+		return domain.Idopont{}, err
+	}
+	if !end.After(start) {
+		return domain.Idopont{}, fmt.Errorf("%w: the end must be after the start", ErrInvalidInput)
+	}
+	i.End = &end
+	return i, nil
+}
+
+// parseLocalTime reads a Budapest wall clock time in LocalTimeLayout and
+// returns it in UTC.
+func parseLocalTime(s string) (time.Time, error) {
+	t, err := time.ParseInLocation(LocalTimeLayout, strings.TrimSpace(s), Budapest)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%w: a time must look like 2026-12-05T20:00", ErrInvalidInput)
+	}
+	return t.UTC(), nil
+}
+
+// EsemenyekOfCsoport lists a Csoport's Esemenyek, newest first. Only Tags
+// may see them; anyone else gets ErrNotFound.
+func (a *App) EsemenyekOfCsoport(ctx context.Context, felhasznaloID, csoportID string) ([]domain.EsemenySummary, error) {
+	if _, err := requireTag(ctx, a.store.Queries, csoportID, felhasznaloID); err != nil {
+		return nil, err
+	}
+	return a.store.ListEsemenyekOfCsoport(ctx, csoportID)
+}
+
+// Esemeny returns an Esemeny with its Idopontok, their counts and Helyezes,
+// and the viewer's own Visszajelzesek. Only Tags of its Csoport may see it;
+// anyone else gets ErrNotFound.
+func (a *App) Esemeny(ctx context.Context, felhasznaloID, esemenyID string) (EsemenyDetail, error) {
+	q := a.store.Queries
+	e, err := requireEsemenyTag(ctx, q, esemenyID, felhasznaloID)
+	if err != nil {
+		return EsemenyDetail{}, err
+	}
+	csoport, err := q.FindCsoport(ctx, e.CsoportID)
+	if err != nil {
+		return EsemenyDetail{}, err
+	}
+	szervezo, err := q.FindFelhasznalo(ctx, e.SzervezoID)
+	if err != nil {
+		return EsemenyDetail{}, err
+	}
+	idopontok, err := q.ListIdopontok(ctx, e.ID)
+	if err != nil {
+		return EsemenyDetail{}, err
+	}
+	visszajelzesek, err := q.ListVisszajelzesekOfEsemeny(ctx, e.ID)
+	if err != nil {
+		return EsemenyDetail{}, err
+	}
+	return EsemenyDetail{
+		Esemeny:      e,
+		CsoportName:  csoport.Name,
+		SzervezoName: szervezo.Name,
+		Idopontok:    idopontAllasok(idopontok, visszajelzesek, felhasznaloID),
+	}, nil
+}
+
+// idopontAllasok counts each Idopont's Visszajelzesek and ranks them.
+func idopontAllasok(idopontok []domain.Idopont, visszajelzesek []domain.VisszajelzesOfEsemeny, viewerID string) []IdopontAllas {
+	out := make([]IdopontAllas, len(idopontok))
+	index := make(map[string]int, len(idopontok))
+	for n, i := range idopontok {
+		out[n] = IdopontAllas{Idopont: i, Visszajelzesek: []domain.VisszajelzesOfEsemeny{}}
+		index[i.ID] = n
+	}
+	for _, v := range visszajelzesek {
+		n, ok := index[v.IdopontID]
+		if !ok {
+			continue
+		}
+		allas := &out[n]
+		allas.Visszajelzesek = append(allas.Visszajelzesek, v)
+		if v.FelhasznaloID == viewerID {
+			allas.Sajat = v.Valasz
+		}
+		if !v.IsTag {
+			continue
+		}
+		switch v.Valasz {
+		case domain.Igen:
+			allas.Igen++
+		case domain.Talan:
+			allas.Talan++
+		case domain.Nem:
+			allas.Nem++
+		}
+	}
+
+	pontszamok := make([]Pontszam, len(out))
+	for n, allas := range out {
+		if allas.Igen+allas.Talan+allas.Nem > 0 {
+			pontszamok[n] = Pontszam{allas.Igen, allas.Talan, -allas.Nem}
+		}
+	}
+	for n, h := range Helyezesek(pontszamok) {
+		out[n].Helyezes = h
+	}
+	return out
+}
+
+// SetVisszajelzes records the Felhasznalo's answer to one Idopont of an
+// Esemeny, replacing any earlier answer. Only Tags of the Esemeny's Csoport
+// may answer; anyone else, and an Idopont of another Esemeny, gets
+// ErrNotFound. Answering is open while the Esemeny is in Egyeztetes;
+// otherwise it gives ErrNotInEgyeztetes.
+func (a *App) SetVisszajelzes(ctx context.Context, felhasznaloID, esemenyID, idopontID string, valasz domain.Valasz) error {
+	if !valasz.Valid() {
+		return fmt.Errorf("%w: a visszajelzes is igen, talan or nem", ErrInvalidInput)
+	}
+	return a.store.InTx(ctx, func(q store.Queries) error {
+		e, err := requireEsemenyTag(ctx, q, esemenyID, felhasznaloID)
+		if err != nil {
+			return err
+		}
+		i, err := q.FindIdopont(ctx, idopontID)
+		if err != nil {
+			return notFound(err)
+		}
+		if i.EsemenyID != e.ID {
+			return ErrNotFound
+		}
+		if e.Allapot != domain.Egyeztetes {
+			return ErrNotInEgyeztetes
+		}
+		return q.UpsertVisszajelzes(ctx, domain.Visszajelzes{
+			IdopontID:     i.ID,
+			FelhasznaloID: felhasznaloID,
+			Valasz:        valasz,
+			UpdatedAt:     a.clock.Now(),
+		})
+	})
+}
+
+// requireEsemenyTag returns the Esemeny if the Felhasznalo is a Tag of its
+// Csoport. Anyone else gets ErrNotFound, whether or not the Esemeny exists.
+func requireEsemenyTag(ctx context.Context, q store.Queries, esemenyID, felhasznaloID string) (domain.Esemeny, error) {
+	e, err := q.FindEsemeny(ctx, esemenyID)
+	if err != nil {
+		return domain.Esemeny{}, notFound(err)
+	}
+	if _, err := requireTag(ctx, q, e.CsoportID, felhasznaloID); err != nil {
+		return domain.Esemeny{}, err
+	}
+	return e, nil
+}
+
+func mustLoadLocation(name string) *time.Location {
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		panic(fmt.Sprintf("load time zone %s: %v", name, err))
+	}
+	return loc
+}

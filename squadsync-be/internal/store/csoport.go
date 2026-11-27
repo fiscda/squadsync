@@ -236,3 +236,14 @@ func (q Queries) RevokeCsoportMeghivo(ctx context.Context, id string, at time.Ti
 	}
 	return nil
 }
+
+// DeleteTag ends the Felhasznalo's membership in the Csoport. Deleting a Tag
+// that doesn't exist is fine.
+func (q Queries) DeleteTag(ctx context.Context, csoportID, felhasznaloID string) error {
+	_, err := q.db.ExecContext(ctx,
+		`DELETE FROM tag WHERE csoport_id = ? AND felhasznalo_id = ?`, csoportID, felhasznaloID)
+	if err != nil {
+		return fmt.Errorf("delete tag: %w", err)
+	}
+	return nil
+}
