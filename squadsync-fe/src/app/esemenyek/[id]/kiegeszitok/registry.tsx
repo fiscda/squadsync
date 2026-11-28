@@ -4,6 +4,7 @@ import { AutokPanel } from "./autok/panel";
 import { FelszerelesPanel } from "./felszereles/panel";
 import { KoltsegekPanel } from "./koltsegek/panel";
 import type { KiegeszitoPanelProps } from "./panel-props";
+import { SzallasPanel } from "./szallas/panel";
 
 /**
  * Every Kiegészítő as the Esemény page shows it. To add one, write its panel
@@ -71,7 +72,18 @@ export const kiegeszitoRegistry: Record<
         "Az autóban több utas ül, mint ahány helyet megadtál.",
     },
   },
-  szallas: { label: "Szállás", icon: "🛏", Panel: null },
+  szallas: {
+    label: "Szállás",
+    icon: "🛏",
+    Panel: SzallasPanel,
+    hibak: {
+      szallas_agy_full: "Ebben az ágyban már nincs szabad hely.",
+      szallas_already_in_agy:
+        "Már van ágyad. Előbb költözz ki belőle, utána választhatsz másikat.",
+      szallas_capacity_below_alvok:
+        "Az ágyban többen alszanak, mint ahány férőhelyet megadtál. Előbb vedd ki őket, vagy töröld az ágyat.",
+    },
+  },
   felszereles: {
     label: "Felszerelés",
     icon: "🎒",

@@ -36,6 +36,8 @@ type DM struct {
 	ElszamolasEmlekezteto *gateway.ElszamolasEmlekezteto
 	// Elszamolas is set for a Felhasznalo's result of an Elszamolas.
 	Elszamolas *gateway.ElszamolasDM
+	// Szallas is set for a sleeper's DM that their Szoba is gone.
+	Szallas *gateway.SzallasDM
 }
 
 // AnnouncementPost is one announcement posted in a channel.
@@ -228,6 +230,17 @@ func (d *Discord) SendElszamolasDM(_ context.Context, discordID string, e gatewa
 		return d.fail
 	}
 	d.dms = append(d.dms, DM{DiscordID: discordID, Elszamolas: &e})
+	return nil
+}
+
+// SendSzallasDM records the message.
+func (d *Discord) SendSzallasDM(_ context.Context, discordID string, z gateway.SzallasDM) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.fail != nil {
+		return d.fail
+	}
+	d.dms = append(d.dms, DM{DiscordID: discordID, Szallas: &z})
 	return nil
 }
 

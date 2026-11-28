@@ -49,6 +49,9 @@ type DiscordMessenger interface {
 	// SendAutoDM tells one Discord account of a passenger that their Auto
 	// is gone.
 	SendAutoDM(ctx context.Context, discordID string, d AutoDM) error
+	// SendSzallasDM tells one Discord account of a sleeper that their Szoba
+	// is gone.
+	SendSzallasDM(ctx context.Context, discordID string, d SzallasDM) error
 	// SendElszamolasEmlekeztetoDM reminds one Discord account of a
 	// Resztvevo to confirm their Kiadasok for the Elszamolas.
 	SendElszamolasEmlekeztetoDM(ctx context.Context, discordID string, e ElszamolasEmlekezteto) error
@@ -98,6 +101,17 @@ type ElszamolasUtalas struct {
 	Name string
 	// Amount is in whole HUF.
 	Amount int
+}
+
+// SzallasDM tells a sleeper that their Szoba was deleted, so they claim a
+// new Agy. Its fields are plain text; the bot words and escapes them.
+type SzallasDM struct {
+	// SzobaName is the name of the deleted Szoba.
+	SzobaName string
+	// Title is the Esemeny's title.
+	Title string
+	// Link is the Esemeny's web page.
+	Link string
 }
 
 // AutoDM tells a passenger that their Auto is gone, so they look for
@@ -367,6 +381,11 @@ func (Disabled) SendElszamolasEmlekeztetoDM(context.Context, string, ElszamolasE
 
 // SendElszamolasDM implements DiscordMessenger.
 func (Disabled) SendElszamolasDM(context.Context, string, ElszamolasDM) error {
+	return ErrNotConfigured
+}
+
+// SendSzallasDM implements DiscordMessenger.
+func (Disabled) SendSzallasDM(context.Context, string, SzallasDM) error {
 	return ErrNotConfigured
 }
 
