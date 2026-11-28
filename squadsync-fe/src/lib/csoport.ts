@@ -9,8 +9,10 @@ import {
   joinCsoport,
   listCsoportMeghivok,
   listCsoportok,
+  listSzervezoEsemenyek,
   type MeghivoPreview,
   previewCsoportMeghivo,
+  type SzervezoEsemeny,
 } from "./backend";
 import {
   ensureFelhasznalo,
@@ -40,6 +42,17 @@ export const getCsoportMeghivok = cache(
   async (csoportId: string): Promise<CsoportMeghivo[] | null> => {
     const felhasznalo = await requireFelhasznalo();
     return listCsoportMeghivok(felhasznalo.id, csoportId);
+  },
+);
+
+/**
+ * The active Események the Tag is the Szervező of, with who could take each
+ * over. The caller may ask about themselves, and an Admin about any Tag.
+ */
+export const getSzervezoEsemenyek = cache(
+  async (csoportId: string, targetId: string): Promise<SzervezoEsemeny[]> => {
+    const felhasznalo = await requireFelhasznalo();
+    return listSzervezoEsemenyek(felhasznalo.id, csoportId, targetId);
   },
 );
 

@@ -10,6 +10,7 @@ import {
   copyEsemeny,
   type EsemenyInput,
   editEsemeny,
+  handOverSzervezo,
   proposeEsemeny,
   removeIdopont,
   reopenEgyeztetes,
@@ -234,6 +235,7 @@ export type AllapotHiba =
   | "not_egyeztetes"
   | "idopont_has_answers"
   | "last_idopont"
+  | "nem_jelolheto"
   | "masolas";
 
 /** The notice for a refusal (403 or 409) of Go, or null for another error. */
@@ -245,6 +247,8 @@ function hibaOf(err: BackendError): AllapotHiba | null {
     case "idopont_has_answers":
     case "last_idopont":
       return err.code;
+    case "not_eligible_szervezo":
+      return "nem_jelolheto";
   }
   if (err.status === 403) {
     return "szervezo";
@@ -306,6 +310,21 @@ export async function reopenEgyeztetesAction(esemenyId: string) {
 export async function cancelEsemenyAction(esemenyId: string) {
   await changeAllapot(esemenyId, (felhasznaloId) =>
     cancelEsemeny(felhasznaloId, esemenyId),
+  );
+}
+
+/**
+ * The Szervező hands the role to another Tag (the form's "felhasznaloId"),
+ * who needs a Visszajelzés on the Esemény. No acceptance is needed: the new
+ * Szervező gets a DM, and from then on this page doesn't show the controls.
+ */
+export async function handOverSzervezoAction(
+  esemenyId: string,
+  formData: FormData,
+) {
+  const newSzervezoId = String(formData.get("felhasznaloId") ?? "");
+  await changeAllapot(esemenyId, (felhasznaloId) =>
+    handOverSzervezo(felhasznaloId, esemenyId, newSzervezoId),
   );
 }
 

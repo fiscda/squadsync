@@ -302,20 +302,6 @@ func (q Queries) CountTags(ctx context.Context, csoportID string) (int, error) {
 	return n, nil
 }
 
-// IsSzervezoOfActiveEsemeny tells whether the Felhasznalo is the Szervezo of
-// an Esemeny of the Csoport that is Egyeztetes or Veglegesitve.
-func (q Queries) IsSzervezoOfActiveEsemeny(ctx context.Context, csoportID, felhasznaloID string) (bool, error) {
-	var found bool
-	err := q.db.QueryRowContext(ctx,
-		`SELECT EXISTS (SELECT 1 FROM esemeny
-		                WHERE csoport_id = ? AND szervezo_id = ? AND allapot IN ('egyeztetes', 'veglegesitve'))`,
-		csoportID, felhasznaloID).Scan(&found)
-	if err != nil {
-		return false, fmt.Errorf("find active esemeny of szervezo: %w", err)
-	}
-	return found, nil
-}
-
 func requireAffected(res sql.Result, what string) error {
 	n, err := res.RowsAffected()
 	if err != nil {

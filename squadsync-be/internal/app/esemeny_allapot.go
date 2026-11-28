@@ -123,18 +123,7 @@ func (a *App) CancelEsemeny(ctx context.Context, felhasznaloID, esemenyID string
 		if err != nil {
 			return err
 		}
-		if e.Allapot != domain.Egyeztetes && e.Allapot != domain.Veglegesitve {
-			return ErrInvalidTransition
-		}
-		// The stored confirmed Idopont stays, only as a record; nothing reads
-		// it in Elmaradt (see confirmedIdopont).
-		if err := q.UpdateEsemenyAllapot(ctx, e.ID, domain.Elmaradt, e.ConfirmedIdopontID); err != nil {
-			return err
-		}
-		if err := cancelVeglegesitve(ctx, q, e.ID); err != nil {
-			return err
-		}
-		ann, err = a.announcement(ctx, q, e, elmaradtHeadline, "")
+		ann, err = a.cancelInTx(ctx, q, e)
 		return err
 	})
 	if err != nil {
@@ -142,6 +131,25 @@ func (a *App) CancelEsemeny(ctx context.Context, felhasznaloID, esemenyID string
 	}
 	a.afterCommit(func(ctx context.Context) { a.announceAllapot(ctx, esemenyID, felhasznaloID, ann) })
 	return nil
+}
+
+// cancelInTx makes an Esemeny in Egyeztetes or Veglegesitve Elmaradt, in the
+// caller's transaction, and returns the announcement to make once it
+// commits (see announceAllapot). Any other state gives ErrInvalidTransition.
+// It checks no one's authority: the caller decides who may cancel.
+func (a *App) cancelInTx(ctx context.Context, q store.Queries, e domain.Esemeny) (gateway.Announcement, error) {
+	if e.Allapot != domain.Egyeztetes && e.Allapot != domain.Veglegesitve {
+		return gateway.Announcement{}, ErrInvalidTransition
+	}
+	// The stored confirmed Idopont stays, only as a record; nothing reads
+	// it in Elmaradt (see confirmedIdopont).
+	if err := q.UpdateEsemenyAllapot(ctx, e.ID, domain.Elmaradt, e.ConfirmedIdopontID); err != nil {
+		return gateway.Announcement{}, err
+	}
+	if err := cancelVeglegesitve(ctx, q, e.ID); err != nil {
+		return gateway.Announcement{}, err
+	}
+	return a.announcement(ctx, q, e, elmaradtHeadline, "")
 }
 
 // requireSzervezo returns the Esemeny if the Felhasznalo is its Szervezo.

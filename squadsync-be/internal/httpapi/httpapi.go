@@ -21,6 +21,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 
@@ -91,6 +92,19 @@ func withFelhasznalo(h felhasznaloHandler) http.HandlerFunc {
 // when it can't. It reports whether decoding succeeded.
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(v); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return false
+	}
+	return true
+}
+
+// decodeOptionalJSON is decodeJSON for a body that may be absent or empty,
+// which leaves v as it is.
+func decodeOptionalJSON(w http.ResponseWriter, r *http.Request, v any) bool {
+	if r.Body == nil || r.Body == http.NoBody {
+		return true
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(v); err != nil && !errors.Is(err, io.EOF) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return false
 	}

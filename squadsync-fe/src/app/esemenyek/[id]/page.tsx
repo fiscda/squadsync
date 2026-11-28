@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import type { EsemenyDetail, Idopont, Valasz } from "@/lib/backend";
+import { getSzervezoEsemenyek } from "@/lib/csoport";
 import { getEsemeny } from "@/lib/esemeny";
 import { requireFelhasznalo } from "@/lib/felhasznalo";
 import { cardClass, linkClass, secondaryButtonClass } from "@/lib/ui";
@@ -24,6 +25,7 @@ import { AddIdopont } from "./add-idopont";
 import { CancelEsemeny } from "./cancel-esemeny";
 import { CopyEsemeny } from "./copy-esemeny";
 import { EditEsemeny } from "./edit-esemeny";
+import { HandOverSzervezo } from "./hand-over-szervezo";
 import { HataridoForm } from "./hatarido-form";
 import { kiegeszitoHibaText } from "./kiegeszitok/registry";
 import { KiegeszitokSection } from "./kiegeszitok/section";
@@ -56,6 +58,8 @@ const hibaText: Record<AllapotHiba, string> = {
   idopont_has_answers:
     "Erre az időpontra már válaszoltak, ezért csak az esemény szervezője törölheti.",
   last_idopont: "Az utolsó időpontot nem lehet törölni.",
+  nem_jelolheto:
+    "A szervezést csak olyan tagnak lehet átadni, aki válaszolt az eseményre. Az átadás nem történt meg.",
   masolas: "Az esemény másolása most nem sikerült. Próbáld újra később.",
 };
 
@@ -81,6 +85,12 @@ async function Esemeny({
   const isSzervezo = esemeny.szervezoId === felhasznalo.id;
   const hasResztvevok =
     esemeny.allapot === "veglegesitve" || esemeny.allapot === "lezajlott";
+  // Who the Szervező could hand the role to (Tags with a Visszajelzés on it).
+  const utodok = isSzervezo
+    ? ((await getSzervezoEsemenyek(esemeny.csoportId, felhasznalo.id)).find(
+        (e) => e.id === esemeny.id,
+      )?.utodok ?? [])
+    : [];
   const notice = isAllapotHiba(hiba)
     ? hibaText[hiba]
     : kiegeszitoHibaText(hiba);
@@ -131,7 +141,9 @@ async function Esemeny({
         </p>
       ) : null}
 
-      {isSzervezo ? <SzervezoControls esemeny={esemeny} /> : null}
+      {isSzervezo ? (
+        <SzervezoControls esemeny={esemeny} utodok={utodok} />
+      ) : null}
 
       {esemeny.description !== "" ? (
         <p className="whitespace-pre-line">{esemeny.description}</p>
@@ -197,8 +209,17 @@ async function Esemeny({
   );
 }
 
-/** Reopening and cancelling; confirming is on each Időpont. */
-function SzervezoControls({ esemeny }: { esemeny: EsemenyDetail }) {
+/**
+ * Reopening, cancelling and handing the role over; confirming is on each
+ * Időpont.
+ */
+function SzervezoControls({
+  esemeny,
+  utodok,
+}: {
+  esemeny: EsemenyDetail;
+  utodok: { felhasznaloId: string; name: string }[];
+}) {
   const canReopen = esemeny.allapot === "veglegesitve";
   const canCancel =
     esemeny.allapot === "egyeztetes" || esemeny.allapot === "veglegesitve";
@@ -233,6 +254,9 @@ function SzervezoControls({ esemeny }: { esemeny: EsemenyDetail }) {
         ) : null}
         {canCancel ? <CancelEsemeny esemenyId={esemeny.id} /> : null}
       </div>
+      {canCancel ? (
+        <HandOverSzervezo esemenyId={esemeny.id} utodok={utodok} />
+      ) : null}
     </section>
   );
 }
