@@ -554,11 +554,11 @@ func (a *App) ClaimAgy(ctx context.Context, felhasznaloID, esemenyID, agyID stri
 		if err != nil {
 			return err
 		}
-		agy, err := findAgyOf(ctx, q, e, agyID)
-		if err != nil {
+		if err := requireClaimAllowed(ctx, q, e, felhasznaloID, holder); err != nil {
 			return err
 		}
-		if err := requireClaimAllowed(ctx, q, e, felhasznaloID, holder); err != nil {
+		agy, err := findAgyOf(ctx, q, e, agyID)
+		if err != nil {
 			return err
 		}
 		return a.sleep(ctx, q, e, agy, holder, false)
@@ -584,11 +584,11 @@ func (a *App) MoveAlvo(ctx context.Context, felhasznaloID, esemenyID, agyID stri
 		if e.SzervezoID != felhasznaloID {
 			return ErrNotPermitted
 		}
-		agy, err := findAgyOf(ctx, q, e, agyID)
-		if err != nil {
+		if err := requireClaimAllowedBy(ctx, q, e, felhasznaloID, holder, true); err != nil {
 			return err
 		}
-		if err := requireClaimAllowedBy(ctx, q, e, felhasznaloID, holder, true); err != nil {
+		agy, err := findAgyOf(ctx, q, e, agyID)
+		if err != nil {
 			return err
 		}
 		return a.sleep(ctx, q, e, agy, holder, true)
@@ -705,7 +705,7 @@ func releaseFoglalasok(ctx context.Context, t *kiegeszitoTx, release func(domain
 		if err := t.q.DeleteFoglalas(ctx, t.e.ID, g.Holder); err != nil {
 			return nil, err
 		}
-		freed = append(freed, fmt.Sprintf("1 ágy a(z) %s szobában", szobaOfAgy[g.AgyID]))
+		freed = append(freed, fmt.Sprintf("1 ágy (%s)", szobaOfAgy[g.AgyID]))
 	}
 	for _, m := range d.masholAlszik {
 		if !release(m.Holder) {

@@ -229,11 +229,18 @@ func TestClaimingASpotNeedsAResztvevoInVeglegesitve(t *testing.T) {
 	if err := h.App.ClaimAgy(ctx, "bela", e.ID, agy.ID, app.FoglalasInput{}); !errors.Is(err, app.ErrClaimingClosed) {
 		t.Fatalf("claiming in Egyeztetes: err = %v, want ErrClaimingClosed", err)
 	}
+	// The state and the Resztvevo checks come before the lookup.
+	if err := h.App.ClaimAgy(ctx, "bela", e.ID, "no-such-agy", app.FoglalasInput{}); !errors.Is(err, app.ErrClaimingClosed) {
+		t.Fatalf("an unknown Agy in Egyeztetes: err = %v, want ErrClaimingClosed", err)
+	}
 	answer(t, h, "anna", d, 0, domain.Igen)
 	answer(t, h, "bela", d, 0, domain.Igen)
 	answer(t, h, "cecil", d, 0, domain.Nem)
 	confirm(t, h, "anna", d, 0)
 
+	if err := h.App.ClaimAgy(ctx, "cecil", e.ID, "no-such-agy", app.FoglalasInput{}); !errors.Is(err, app.ErrNotResztvevo) {
+		t.Fatalf("a non-Resztvevo and an unknown Agy: err = %v, want ErrNotResztvevo", err)
+	}
 	if err := h.App.ClaimAgy(ctx, "cecil", e.ID, agy.ID, app.FoglalasInput{}); !errors.Is(err, app.ErrNotResztvevo) {
 		t.Fatalf("a non-Resztvevo: err = %v, want ErrNotResztvevo", err)
 	}
@@ -607,7 +614,7 @@ func TestWhenASleeperDropsOutTheirSpotAndMarkAreFreedWithoutDMsToOthers(t *testi
 		t.Fatalf("máshol alszik = %+v, want the mark cleared", z.MasholAlszik)
 	}
 	drop := dropOutDMs(h)
-	if len(drop) != 2 || drop[0].DropOut.Felszabadult != "1 ágy a(z) Emeleti szobában" || drop[1].DropOut.Felszabadult != "" {
+	if len(drop) != 2 || drop[0].DropOut.Felszabadult != "1 ágy (Emeleti)" || drop[1].DropOut.Felszabadult != "" {
 		t.Fatalf("drop-out DMs = %+v", drop)
 	}
 	if n := len(szallasDMs(h)); n != 0 {

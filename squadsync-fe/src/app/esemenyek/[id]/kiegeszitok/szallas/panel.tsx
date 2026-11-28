@@ -81,13 +81,13 @@ export async function SzallasPanel({ esemeny }: KiegeszitoPanelProps) {
 
       {anySetup ? (
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          {agyNelkul.length > 0
-            ? `🛏 ${agyNelkul.length} főnek nincs ágya: ${agyNelkul
-                .map(nameOf)
-                .join(", ")}`
-            : veglegesitve
-              ? "🛏 Mindenkinek van ágya. ✓"
-              : "🛏 Az ágyak a véglegesítés után számítanak."}
+          {!veglegesitve
+            ? "🛏 Az ágyak a véglegesítés után számítanak."
+            : agyNelkul.length > 0
+              ? `🛏 ${agyNelkul.length} főnek nincs ágya: ${agyNelkul
+                  .map(nameOf)
+                  .join(", ")}`
+              : "🛏 Mindenkinek van ágya. ✓"}
         </p>
       ) : (
         <p className="text-sm text-zinc-500">
