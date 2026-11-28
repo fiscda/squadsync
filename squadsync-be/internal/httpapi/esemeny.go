@@ -13,6 +13,10 @@ func (s *server) registerEsemeny(mux *http.ServeMux) {
 	mux.HandleFunc("POST /csoport/{id}/esemeny", withFelhasznalo(s.proposeEsemeny))
 	mux.HandleFunc("GET /csoport/{id}/esemeny", withFelhasznalo(s.listEsemenyek))
 	mux.HandleFunc("GET /esemeny/{id}", withFelhasznalo(s.getEsemeny))
+	mux.HandleFunc("PUT /esemeny/{id}", withFelhasznalo(s.editEsemeny))
+	mux.HandleFunc("POST /esemeny/{id}/masolas", withFelhasznalo(s.copyEsemeny))
+	mux.HandleFunc("POST /esemeny/{id}/idopont", withFelhasznalo(s.addIdopont))
+	mux.HandleFunc("DELETE /esemeny/{id}/idopont/{idopontID}", withFelhasznalo(s.removeIdopont))
 	mux.HandleFunc("PUT /esemeny/{id}/idopont/{idopontID}/visszajelzes", withFelhasznalo(s.setVisszajelzes))
 	mux.HandleFunc("POST /esemeny/{id}/veglegesites", withFelhasznalo(s.confirmIdopont))
 	mux.HandleFunc("POST /esemeny/{id}/ujranyitas", withFelhasznalo(s.reopenEgyeztetes))
@@ -71,6 +75,8 @@ type idopontJSON struct {
 	Answerable bool `json:"answerable"`
 	// Confirmed: the Esemeny's confirmed Idopont (Veglegesitve or Lezajlott).
 	Confirmed bool `json:"confirmed"`
+	// Removable: the caller may remove it now.
+	Removable bool `json:"removable"`
 }
 
 type resztvevoJSON struct {
@@ -121,6 +127,7 @@ func toIdopontJSON(a app.IdopontAllas) idopontJSON {
 		Visszajelzesek: make([]visszajelzesJSON, 0, len(a.Visszajelzesek)),
 		Answerable:     a.Answerable,
 		Confirmed:      a.Confirmed,
+		Removable:      a.Removable,
 	}
 	if a.Helyezes > 0 {
 		h := int(a.Helyezes)
@@ -269,9 +276,81 @@ func (s *server) setVisszajelzes(w http.ResponseWriter, r *http.Request, felhasz
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *server) editEsemeny(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
+	var body struct {
+		Title       string       `json:"title"`
+		Description string       `json:"description"`
+		Helyszin    helyszinJSON `json:"helyszin"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	err := s.app.EditEsemeny(r.Context(), felhasznaloID, r.PathValue("id"), app.EsemenyDetailsInput{
+		Title:       body.Title,
+		Description: body.Description,
+		Helyszin:    domain.Helyszin{Name: body.Helyszin.Name, URL: body.Helyszin.URL},
+	})
+	if err != nil {
+		s.writeEsemenyError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *server) addIdopont(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
+	var body struct {
+		Start      string `json:"start"`
+		End        string `json:"end"`
+		EgeszNapos bool   `json:"egeszNapos"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	i, err := s.app.AddIdopont(r.Context(), felhasznaloID, r.PathValue("id"), app.IdopontInput{Start: body.Start, End: body.End, EgeszNapos: body.EgeszNapos})
+	if err != nil {
+		s.writeEsemenyError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]string{"id": i.ID})
+}
+
+func (s *server) removeIdopont(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
+	if err := s.app.RemoveIdopont(r.Context(), felhasznaloID, r.PathValue("id"), r.PathValue("idopontID")); err != nil {
+		s.writeEsemenyError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *server) copyEsemeny(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
+	e, err := s.app.CopyEsemeny(r.Context(), felhasznaloID, r.PathValue("id"))
+	if err != nil {
+		s.writeEsemenyError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, toEsemenyJSON(e))
+}
+
 func (s *server) writeEsemenyError(w http.ResponseWriter, r *http.Request, err error) {
 	if writeHataridoNotFuture(w, err) {
 		return
+	}
+	for _, c := range []struct {
+		err    error
+		status int
+		code   string
+	}{
+		{app.ErrEsemenyElmaradt, http.StatusConflict, "esemeny_elmaradt"},
+		{app.ErrNotEgyeztetes, http.StatusConflict, "not_egyeztetes"},
+		{app.ErrTooManyIdopontok, http.StatusConflict, "too_many_idopontok"},
+		{app.ErrIdopontHasAnswers, http.StatusConflict, "idopont_has_answers"},
+		{app.ErrLastIdopont, http.StatusConflict, "last_idopont"},
+		{app.ErrNotPermitted, http.StatusForbidden, "not_permitted"},
+	} {
+		if errors.Is(err, c.err) {
+			writeCodedError(w, c.status, err, c.code)
+			return
+		}
 	}
 	switch {
 	case errors.Is(err, app.ErrIdopontNotAnswerable), errors.Is(err, app.ErrInvalidTransition):

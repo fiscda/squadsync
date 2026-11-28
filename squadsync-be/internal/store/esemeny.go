@@ -75,6 +75,24 @@ func (q Queries) UpdateEsemenyAllapot(ctx context.Context, esemenyID string, all
 	return nil
 }
 
+// UpdateEsemenyDetails sets an Esemeny's title, description and Helyszin.
+// It returns ErrNotFound if the Esemeny doesn't exist.
+func (q Queries) UpdateEsemenyDetails(ctx context.Context, esemenyID, title, description string, h domain.Helyszin) error {
+	res, err := q.db.ExecContext(ctx,
+		`UPDATE esemeny SET title = ?, description = ?, helyszin_name = ?, helyszin_url = ? WHERE id = ?`,
+		title, description, h.Name, h.URL, esemenyID,
+	)
+	if err != nil {
+		return fmt.Errorf("update esemeny details: %w", err)
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("update esemeny details: %w", err)
+	} else if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // ListEsemenyekOfCsoport returns a Csoport's Esemenyek, newest first, each
 // with its number of Idopontok and its earliest start.
 func (q Queries) ListEsemenyekOfCsoport(ctx context.Context, csoportID string) ([]domain.EsemenySummary, error) {
@@ -180,6 +198,21 @@ func (q Queries) ListIdopontok(ctx context.Context, esemenyID string) ([]domain.
 		list = append(list, i)
 	}
 	return list, rows.Err()
+}
+
+// DeleteIdopont removes an Idopont together with every Visszajelzes on it
+// (they cascade). It returns ErrNotFound if the Idopont doesn't exist.
+func (q Queries) DeleteIdopont(ctx context.Context, id string) error {
+	res, err := q.db.ExecContext(ctx, `DELETE FROM idopont WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete idopont: %w", err)
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("delete idopont: %w", err)
+	} else if n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // UpsertVisszajelzes stores a Felhasznalo's Visszajelzes on an Idopont,

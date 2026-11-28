@@ -708,6 +708,8 @@ export type Idopont = {
   answerable: boolean;
   /** The confirmed Időpont of a Véglegesítve or Lezajlott Esemény. */
   confirmed: boolean;
+  /** The caller may remove it now (see removeIdopont). */
+  removable: boolean;
 };
 
 /** Someone with igen on the confirmed Időpont. */
@@ -849,6 +851,76 @@ export async function cancelEsemeny(
     felhasznaloId,
     "POST",
     `/esemeny/${encodeURIComponent(esemenyId)}/lemondas`,
+  );
+}
+
+/**
+ * The Szervező edits the title, description and Helyszín, in any state but
+ * Elmaradt. Fails with 403 for another Tag, 409 with code "esemeny_elmaradt",
+ * and 400 for bad input.
+ */
+export async function editEsemeny(
+  felhasznaloId: string,
+  esemenyId: string,
+  input: { title: string; description: string; helyszin: Helyszin },
+): Promise<void> {
+  await callBackend<void>(
+    felhasznaloId,
+    "PUT",
+    `/esemeny/${encodeURIComponent(esemenyId)}`,
+    input,
+  );
+}
+
+/**
+ * Any Tag adds an Időpont during Egyeztetés, in the format of
+ * EsemenyInput.idopontok. Fails with 409 (code "not_egyeztetes" or
+ * "too_many_idopontok"), 422 for a time skipped by the DST change and 400
+ * for bad input.
+ */
+export async function addIdopont(
+  felhasznaloId: string,
+  esemenyId: string,
+  idopont: EsemenyInput["idopontok"][number],
+): Promise<void> {
+  await callBackend<unknown>(
+    felhasznaloId,
+    "POST",
+    `/esemeny/${encodeURIComponent(esemenyId)}/idopont`,
+    idopont,
+  );
+}
+
+/**
+ * Removes an Időpont during Egyeztetés, with its Visszajelzések. The
+ * Szervező may remove any; the Tag who added it only while nobody has
+ * answered it. Fails with 403 (code "not_permitted"), 409 (code
+ * "not_egyeztetes", "idopont_has_answers" or "last_idopont").
+ */
+export async function removeIdopont(
+  felhasznaloId: string,
+  esemenyId: string,
+  idopontId: string,
+): Promise<void> {
+  await callBackend<void>(
+    felhasznaloId,
+    "DELETE",
+    `/esemeny/${encodeURIComponent(esemenyId)}/idopont/${encodeURIComponent(idopontId)}`,
+  );
+}
+
+/**
+ * Any Tag copies an Esemény (in any state) into a new one in Egyeztetés,
+ * with every Időpont a week later and the caller as Szervező.
+ */
+export function copyEsemeny(
+  felhasznaloId: string,
+  esemenyId: string,
+): Promise<Esemeny> {
+  return callBackend(
+    felhasznaloId,
+    "POST",
+    `/esemeny/${encodeURIComponent(esemenyId)}/masolas`,
   );
 }
 
