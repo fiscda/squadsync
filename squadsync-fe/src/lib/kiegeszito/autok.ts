@@ -104,6 +104,32 @@ export async function getAutoUtasai(
   );
 }
 
+export type UzemanyagInput = {
+  /** Whole HUF. */
+  amount: number;
+  /** "" for the default, "Üzemanyag – <Sofőr> autója". */
+  description: string;
+  /** "" means the caller. */
+  payerId: string;
+  /** Split among every Résztvevő instead of the Autó's people. */
+  mindenki: boolean;
+};
+
+/** Records a fuel Kiadás from the Autó (#21). */
+export async function addUzemanyag(
+  felhasznaloId: string,
+  esemenyId: string,
+  autoId: string,
+  input: UzemanyagInput,
+): Promise<void> {
+  await callBackend(
+    felhasznaloId,
+    "POST",
+    `${autoPath(esemenyId, autoId)}/uzemanyag`,
+    input,
+  );
+}
+
 export async function offerAuto(
   felhasznaloId: string,
   esemenyId: string,

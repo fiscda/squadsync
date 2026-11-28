@@ -134,3 +134,42 @@ func TestAutokOverHTTP(t *testing.T) {
 		t.Fatalf("after deleting: %+v", a)
 	}
 }
+
+func TestUzemanyagOverHTTP(t *testing.T) {
+	api, esemenyID, idopontok := lifecycleSetup(t)
+	base := "/esemeny/" + esemenyID + "/autok"
+	expectStatus(t, call(t, api, http.MethodPut, "/esemeny/"+esemenyID+"/kiegeszito/autok", `{"enabled":true}`, as("anna")), http.StatusNoContent)
+	for _, who := range []string{"anna", "bela"} {
+		expectStatus(t, call(t, api, http.MethodPut, "/esemeny/"+esemenyID+"/idopont/"+idopontok[0]+"/visszajelzes", `{"valasz":"igen"}`, as(who)), http.StatusNoContent)
+	}
+	expectStatus(t, call(t, api, http.MethodPost, "/esemeny/"+esemenyID+"/veglegesites", `{"idopontId":"`+idopontok[0]+`"}`, as("anna")), http.StatusNoContent)
+	auto := decode[struct {
+		ID string `json:"id"`
+	}](t, call(t, api, http.MethodPost, base+"/auto", `{"seats":2}`, as("bela")))
+	expectStatus(t, call(t, api, http.MethodPost, base+"/auto/"+auto.ID+"/ules", `{}`, as("anna")), http.StatusNoContent)
+
+	// Koltsegek is off.
+	rec := call(t, api, http.MethodPost, base+"/auto/"+auto.ID+"/uzemanyag", `{"amount":1001}`, as("anna"))
+	expectStatus(t, rec, http.StatusConflict)
+	if e := decode[errorResp](t, rec); e.Code != "autok_koltsegek_off" {
+		t.Fatalf("code = %q, want autok_koltsegek_off", e.Code)
+	}
+	expectStatus(t, call(t, api, http.MethodPut, "/esemeny/"+esemenyID+"/kiegeszito/koltsegek", `{"enabled":true}`, as("anna")), http.StatusNoContent)
+
+	expectStatus(t, call(t, api, http.MethodPost, base+"/auto/"+auto.ID+"/uzemanyag", `{"amount":0}`, as("anna")), http.StatusBadRequest)
+	expectStatus(t, call(t, api, http.MethodPost, base+"/auto/nope/uzemanyag", `{"amount":10}`, as("anna")), http.StatusNotFound)
+	expectStatus(t, call(t, api, http.MethodPost, base+"/auto/"+auto.ID+"/uzemanyag", `{"amount":10}`, as("dani")), http.StatusNotFound)
+	rec = call(t, api, http.MethodPost, base+"/auto/"+auto.ID+"/uzemanyag", `{"amount":10,"payerId":"dani"}`, as("anna"))
+	expectStatus(t, rec, http.StatusForbidden)
+	if e := decode[errorResp](t, rec); e.Code != "koltsegek_not_resztvevo" {
+		t.Fatalf("code = %q, want koltsegek_not_resztvevo", e.Code)
+	}
+
+	rec = call(t, api, http.MethodPost, base+"/auto/"+auto.ID+"/uzemanyag", `{"amount":1001,"payerId":"bela"}`, as("anna"))
+	expectStatus(t, rec, http.StatusCreated)
+	k := decode[koltsegekResp](t, call(t, api, http.MethodGet, "/esemeny/"+esemenyID+"/koltsegek", "", as("anna")))
+	if len(k.Kiadasok) != 1 || k.Kiadasok[0].Description != "Üzemanyag – Béla autója" || k.Kiadasok[0].PayerID != "bela" ||
+		k.Kiadasok[0].Allapot != "kifizetve" || len(k.Kiadasok[0].Reszek) != 2 {
+		t.Fatalf("kiadasok = %+v", k.Kiadasok)
+	}
+}

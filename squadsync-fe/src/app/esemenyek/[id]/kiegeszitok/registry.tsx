@@ -68,6 +68,8 @@ export const kiegeszitoRegistry: Record<
         "A sofőr nem ülhet másik autóba, és nem lehet „saját úton” sem.",
       autok_already_seated:
         "Már van helyed egy autóban. Előbb szállj ki, utána szállhatsz be máshova.",
+      autok_koltsegek_off:
+        "Az üzemanyag rögzítéséhez a Költségek kiegészítő kell. Kérd meg a szervezőt, hogy kapcsolja be.",
       autok_seats_below_utasok:
         "Az autóban több utas ül, mint ahány helyet megadtál.",
     },

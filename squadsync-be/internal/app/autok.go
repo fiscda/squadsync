@@ -35,8 +35,8 @@ import (
 //   - A Sofor dropping out (releaseUlesek) removes the Auto, makes the
 //     passengers seatless and DMs them.
 //
-// For #21 (the fuel shortcut): AutoUtasai, or autoUtasai inside a
-// transaction, gives an Auto's Sofor and passengers.
+// Fuel (#21): AddUzemanyagKiadas records a Koltsegek Kiadas from an Auto,
+// split among its Sofor and passengers (or every Resztvevo).
 
 func init() {
 	registerKiegeszito(kiegeszito{
@@ -67,6 +67,9 @@ var (
 	// ErrAutoSeatsBelowUtasok means the Auto can't have fewer seats than it
 	// has passengers.
 	ErrAutoSeatsBelowUtasok = errors.New("the auto has more passengers than that many seats")
+	// ErrAutoKoltsegekOff means a fuel Kiadas needs Koltsegek, which is
+	// switched off: ask the Szervezo to switch it on.
+	ErrAutoKoltsegekOff = errors.New("koltsegek is switched off: ask the szervezo to switch it on")
 )
 
 // AutoInput is an Auto being offered or edited.
@@ -308,6 +311,60 @@ func (a *App) AutoUtasai(ctx context.Context, felhasznaloID, esemenyID, autoID s
 		return AutoUtasai{}, err
 	}
 	return autoUtasai(ctx, q, e.ID, autoID)
+}
+
+// UzemanyagInput is a fuel Kiadas from an Auto.
+type UzemanyagInput struct {
+	// Amount is in whole HUF.
+	Amount int
+	// Description "" means "Üzemanyag – <Sofor> autója".
+	Description string
+	// PayerID "" means the caller.
+	PayerID string
+	// Mindenki splits it among every Resztvevo instead of the Auto's Sofor
+	// and passengers.
+	Mindenki bool
+}
+
+// AddUzemanyagKiadas records a fuel Kiadas (kifizetve) from an Auto, split
+// equally among its Sofor and passengers, read in the same transaction, or
+// among every Resztvevo with in.Mindenki. It goes through AddKiadas's rules
+// (Koltsegek on, the Elszamolas lock, caller and payer Resztvevok, ...).
+// Koltsegek being off is ErrAutoKoltsegekOff; an Auto of another Esemeny is
+// ErrNotFound.
+func (a *App) AddUzemanyagKiadas(ctx context.Context, felhasznaloID, esemenyID, autoID string, in UzemanyagInput) (domain.Kiadas, error) {
+	var k domain.Kiadas
+	err := a.store.InTx(ctx, func(q store.Queries) error {
+		e, err := requireKiegeszitoOn(ctx, q, esemenyID, felhasznaloID, domain.Autok)
+		if err != nil {
+			return err
+		}
+		on, err := q.EnabledKiegeszitok(ctx, e.ID)
+		if err != nil {
+			return err
+		}
+		if !on[domain.Koltsegek] {
+			return ErrAutoKoltsegekOff
+		}
+		occupants, err := autoUtasai(ctx, q, e.ID, autoID)
+		if err != nil {
+			return err
+		}
+		ki := KiadasInput{Description: in.Description, Amount: in.Amount, PayerID: in.PayerID, Allapot: domain.Kifizetve}
+		if strings.TrimSpace(ki.Description) == "" {
+			ki.Description = "Üzemanyag – " + occupants.Auto.SoforName + " autója"
+		}
+		if !in.Mindenki {
+			ki.Split = &SplitInput{Holders: occupants.Holders()}
+		}
+		k, err = a.addKiadas(ctx, q, felhasznaloID, e.ID, ki)
+		return err
+	})
+	if err != nil {
+		return domain.Kiadas{}, err
+	}
+	a.kiegeszitoChanged(esemenyID)
+	return k, nil
 }
 
 func validAuto(in AutoInput) (AutoInput, error) {

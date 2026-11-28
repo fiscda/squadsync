@@ -15,6 +15,7 @@ func (s *server) registerAutok(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /esemeny/{id}/autok/auto/{autoID}", withFelhasznalo(s.updateAuto))
 	mux.HandleFunc("DELETE /esemeny/{id}/autok/auto/{autoID}", withFelhasznalo(s.deleteAuto))
 	mux.HandleFunc("GET /esemeny/{id}/autok/auto/{autoID}/utasai", withFelhasznalo(s.getAutoUtasai))
+	mux.HandleFunc("POST /esemeny/{id}/autok/auto/{autoID}/uzemanyag", withFelhasznalo(s.addUzemanyag))
 	mux.HandleFunc("POST /esemeny/{id}/autok/auto/{autoID}/ules", withFelhasznalo(s.claimUles))
 	mux.HandleFunc("PUT /esemeny/{id}/autok/auto/{autoID}/utas", withFelhasznalo(s.moveUtas))
 	mux.HandleFunc("DELETE /esemeny/{id}/autok/ules", withFelhasznalo(s.releaseUles))
@@ -221,6 +222,25 @@ func (s *server) setSajatUton(w http.ResponseWriter, r *http.Request, felhasznal
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *server) addUzemanyag(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
+	var body struct {
+		Amount      int    `json:"amount"`
+		Description string `json:"description"`
+		PayerID     string `json:"payerId"`
+		Mindenki    bool   `json:"mindenki"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	k, err := s.app.AddUzemanyagKiadas(r.Context(), felhasznaloID, r.PathValue("id"), r.PathValue("autoID"),
+		app.UzemanyagInput{Amount: body.Amount, Description: body.Description, PayerID: body.PayerID, Mindenki: body.Mindenki})
+	if err != nil {
+		s.writeAutokError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, toKiadasJSON(k))
+}
+
 func (s *server) writeAutokError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, app.ErrAutoFull):
@@ -233,7 +253,10 @@ func (s *server) writeAutokError(w http.ResponseWriter, r *http.Request, err err
 		writeCodedError(w, http.StatusConflict, err, "autok_already_seated")
 	case errors.Is(err, app.ErrAutoSeatsBelowUtasok):
 		writeCodedError(w, http.StatusConflict, err, "autok_seats_below_utasok")
+	case errors.Is(err, app.ErrAutoKoltsegekOff):
+		writeCodedError(w, http.StatusConflict, err, "autok_koltsegek_off")
 	default:
-		s.writeKiegeszitoError(w, r, err)
+		// The fuel Kiadas runs through Koltsegek's rules.
+		s.writeKoltsegekError(w, r, err)
 	}
 }
