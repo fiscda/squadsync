@@ -79,35 +79,60 @@ func (v Valasz) Valid() bool {
 	return v == Igen || v == Talan || v == Nem
 }
 
-// Visszajelzes is one answer to one Idopont, given by a Felhasznalo. There
-// is at most one per Idopont and Felhasznalo; answering again changes it.
+// Visszajelzes is one answer to one Idopont, given by a Felhasznalo, or by
+// a Tag for a name-only Vendeg they added. Exactly one of FelhasznaloID and
+// VendegID is set. There is at most one per Idopont and person; answering
+// again changes it.
 type Visszajelzes struct {
 	IdopontID     string
 	FelhasznaloID string
-	Valasz        Valasz
-	UpdatedAt     time.Time
+	// VendegID is the name-only Vendeg the answer is for, "" otherwise.
+	VendegID  string
+	Valasz    Valasz
+	UpdatedAt time.Time
+}
+
+// Holder is who the Visszajelzes is for, as a ClaimHolder.
+func (v Visszajelzes) Holder() ClaimHolder {
+	if v.VendegID != "" {
+		return ClaimHolder{VendegID: v.VendegID}
+	}
+	return ClaimHolder{FelhasznaloID: v.FelhasznaloID}
 }
 
 // VisszajelzesOfEsemeny is a Visszajelzes as an Esemeny's page shows it:
-// with the name of whoever gave it and whether they are a Tag of the
-// Esemeny's Csoport (only Tags count toward the Helyezes). A row not given
-// by a Felhasznalo (a name-only Vendeg's, #13) has an empty FelhasznaloID
-// and name until #13 fills them in.
+// with the name of whoever it is for, whether they are a Tag of the
+// Esemeny's Csoport (only Tags count toward the Helyezes) and whether they
+// are a Vendeg of the Esemeny. A name-only Vendeg's has an empty
+// FelhasznaloID, their name as FelhasznaloName, and VendegAddedBy set.
 type VisszajelzesOfEsemeny struct {
 	Visszajelzes
 	FelhasznaloName string
 	IsTag           bool
+	// IsVendeg tells whether they are a Vendeg of the Esemeny, of either
+	// kind. Someone can be both a Tag and a Vendeg (a Vendeg who later
+	// joined the Csoport); they count as a Tag.
+	IsVendeg bool
+	// VendegAddedBy is the Tag who added a name-only Vendeg, and who alone
+	// answers for them; "" otherwise.
+	VendegAddedBy string
 }
 
 // Resztvevo is someone with igen on the confirmed Idopont of a Veglegesitve
-// (or Lezajlott) Esemeny. For now only Tags answer, so every Resztvevo is a
-// Tag and a Felhasznalo. #13 adds Vendegs: a Vendeg who is a Felhasznalo
-// keeps FelhasznaloID with IsTag false, and a name-only Vendeg has an empty
-// FelhasznaloID (and gets its own id field).
+// (or Lezajlott) Esemeny: a Tag, a Vendeg who is a Felhasznalo (FelhasznaloID
+// set, IsTag false, IsVendeg true), or a name-only Vendeg (FelhasznaloID
+// empty, VendegID and AddedBy set).
 type Resztvevo struct {
 	FelhasznaloID string
-	Name          string
-	IsTag         bool
+	// VendegID is a name-only Vendeg's id, "" otherwise.
+	VendegID string
+	Name     string
+	IsTag    bool
+	// IsVendeg tells whether they are a Vendeg rather than a Tag.
+	IsVendeg bool
+	// AddedBy is the Tag who added a name-only Vendeg, "" otherwise: their
+	// Tag claims and confirms for them and pays their share.
+	AddedBy string
 }
 
 // EsemenySummary is an Esemeny in a Csoport's list.

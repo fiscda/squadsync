@@ -215,16 +215,22 @@ func (q Queries) DeleteIdopont(ctx context.Context, id string) error {
 	return nil
 }
 
-// UpsertVisszajelzes stores a Felhasznalo's Visszajelzes on an Idopont,
-// replacing their earlier one.
+// UpsertVisszajelzes stores a Visszajelzes on an Idopont (a Felhasznalo's,
+// or a name-only Vendeg's when v.VendegID is set), replacing the earlier
+// one.
 func (q Queries) UpsertVisszajelzes(ctx context.Context, v domain.Visszajelzes) error {
 	at := formatTime(v.UpdatedAt)
+	f, vendeg := holderColumns(v.Holder())
+	conflict := `(idopont_id, felhasznalo_id) WHERE felhasznalo_id IS NOT NULL`
+	if v.VendegID != "" {
+		conflict = `(idopont_id, vendeg_id) WHERE vendeg_id IS NOT NULL`
+	}
 	_, err := q.db.ExecContext(ctx,
-		`INSERT INTO visszajelzes (idopont_id, felhasznalo_id, valasz, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?)
-		 ON CONFLICT (idopont_id, felhasznalo_id) WHERE felhasznalo_id IS NOT NULL
+		`INSERT INTO visszajelzes (idopont_id, felhasznalo_id, vendeg_id, valasz, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?)
+		 ON CONFLICT `+conflict+`
 		 DO UPDATE SET valasz = excluded.valasz, updated_at = excluded.updated_at`,
-		v.IdopontID, v.FelhasznaloID, string(v.Valasz), at, at,
+		v.IdopontID, f, vendeg, string(v.Valasz), at, at,
 	)
 	if err != nil {
 		return fmt.Errorf("upsert visszajelzes: %w", err)
@@ -232,14 +238,14 @@ func (q Queries) UpsertVisszajelzes(ctx context.Context, v domain.Visszajelzes) 
 	return nil
 }
 
-// FindValasz returns the Felhasznalo's Visszajelzes on the Idopont, or ""
-// if they haven't answered it. A name-only Vendeg's (#13) needs its own
-// lookup by vendeg_id.
-func (q Queries) FindValasz(ctx context.Context, idopontID, felhasznaloID string) (domain.Valasz, error) {
+// FindValasz returns the holder's Visszajelzes on the Idopont (a
+// Felhasznalo's, or a name-only Vendeg's), or "" if there is none.
+func (q Queries) FindValasz(ctx context.Context, idopontID string, h domain.ClaimHolder) (domain.Valasz, error) {
+	f, v := holderColumns(h)
 	var valasz string
 	err := q.db.QueryRowContext(ctx,
-		`SELECT valasz FROM visszajelzes WHERE idopont_id = ? AND felhasznalo_id = ?`,
-		idopontID, felhasznaloID,
+		`SELECT valasz FROM visszajelzes WHERE idopont_id = ? AND felhasznalo_id IS ? AND vendeg_id IS ?`,
+		idopontID, f, v,
 	).Scan(&valasz)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
@@ -251,21 +257,25 @@ func (q Queries) FindValasz(ctx context.Context, idopontID, felhasznaloID string
 }
 
 // ListVisszajelzesekOfEsemeny returns every Visszajelzes on the Esemeny's
-// Idopontok with the name of whoever gave it and whether they are a Tag of
-// the Esemeny's Csoport, ordered by name. Rows not given by a Felhasznalo
-// (a name-only Vendeg's, once #13 adds them) are kept, with an empty
-// FelhasznaloID and name and IsTag false; #13 must join vendeg here to fill
-// in their name.
+// Idopontok with the name of whoever it is for, whether they are a Tag of
+// the Esemeny's Csoport and whether they are a Vendeg of the Esemeny,
+// ordered by name. A name-only Vendeg's has an empty FelhasznaloID, the
+// Vendeg's name and their Tag in VendegAddedBy.
 func (q Queries) ListVisszajelzesekOfEsemeny(ctx context.Context, esemenyID string) ([]domain.VisszajelzesOfEsemeny, error) {
 	rows, err := q.db.QueryContext(ctx,
-		`SELECT v.idopont_id, COALESCE(v.felhasznalo_id, ''), v.valasz, v.updated_at, COALESCE(f.name, ''),
-		        EXISTS (SELECT 1 FROM tag t WHERE t.csoport_id = e.csoport_id AND t.felhasznalo_id = v.felhasznalo_id)
+		`SELECT v.idopont_id, COALESCE(v.felhasznalo_id, ''), COALESCE(v.vendeg_id, ''), v.valasz, v.updated_at,
+		        COALESCE(f.name, vg.name, ''),
+		        EXISTS (SELECT 1 FROM tag t WHERE t.csoport_id = e.csoport_id AND t.felhasznalo_id = v.felhasznalo_id),
+		        vg.id IS NOT NULL
+		          OR EXISTS (SELECT 1 FROM vendeg fv WHERE fv.esemeny_id = e.id AND fv.felhasznalo_id = v.felhasznalo_id),
+		        COALESCE(vg.added_by, '')
 		 FROM visszajelzes v
 		 JOIN idopont i ON i.id = v.idopont_id
 		 JOIN esemeny e ON e.id = i.esemeny_id
 		 LEFT JOIN felhasznalo f ON f.id = v.felhasznalo_id
+		 LEFT JOIN vendeg vg ON vg.id = v.vendeg_id
 		 WHERE i.esemeny_id = ?
-		 ORDER BY COALESCE(f.name, ''), v.felhasznalo_id`,
+		 ORDER BY COALESCE(f.name, vg.name, ''), v.felhasznalo_id, v.vendeg_id`,
 		esemenyID,
 	)
 	if err != nil {
@@ -277,7 +287,7 @@ func (q Queries) ListVisszajelzesekOfEsemeny(ctx context.Context, esemenyID stri
 	for rows.Next() {
 		var v domain.VisszajelzesOfEsemeny
 		var valasz, updatedAt string
-		if err := rows.Scan(&v.IdopontID, &v.FelhasznaloID, &valasz, &updatedAt, &v.FelhasznaloName, &v.IsTag); err != nil {
+		if err := rows.Scan(&v.IdopontID, &v.FelhasznaloID, &v.VendegID, &valasz, &updatedAt, &v.FelhasznaloName, &v.IsTag, &v.IsVendeg, &v.VendegAddedBy); err != nil {
 			return nil, fmt.Errorf("list visszajelzesek: %w", err)
 		}
 		v.Valasz = domain.Valasz(valasz)

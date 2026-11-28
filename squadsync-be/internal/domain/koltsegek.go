@@ -43,14 +43,19 @@ type Kiadas struct {
 
 // KiadasResz is one person's share of a Kiadas, in whole HUF. A Kiadas's
 // shares add up to its amount, and its holders are fixed when it is
-// created (drop-outs never change them). A name-only Vendeg's (#13) share
-// is charged to the Tag who added them.
+// created (drop-outs never change them). A name-only Vendeg's share is
+// charged to the Tag who added them.
 type KiadasResz struct {
 	KiadasID string
 	Holder   ClaimHolder
 	// Name is the holder's name, for showing.
 	Name   string
 	Amount int
+	// ChargedTo is the Felhasznalo who pays this share in the balances: the
+	// holder, or a name-only Vendeg's Tag. Filled in by reads.
+	ChargedTo string
+	// ChargedToName is ChargedTo's name, filled in by reads.
+	ChargedToName string
 }
 
 // Elszamolas is a calculated Elszamolas of an Esemeny: the one-time

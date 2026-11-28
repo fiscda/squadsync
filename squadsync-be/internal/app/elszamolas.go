@@ -27,7 +27,9 @@ import (
 //
 // Each Resztvevo presses "Rögzítettem a kiadásaimat"
 // (ConfirmKiadasokRecorded), and may take it back ("Mégsem",
-// UnconfirmKiadasokRecorded) until the calculation runs. Nobody confirms
+// UnconfirmKiadasokRecorded) until the calculation runs. A Vendeg who is a
+// Felhasznalo confirms for themselves; a Tag's press confirms (and takes
+// back) their name-only Vendegek too, even if the Tag isn't a Resztvevo. Nobody confirms
 // while they are the payer of a tervezett Kiadas (ErrElszamolasTervezett),
 // and recording or editing a Kiadas so that someone is the payer of a
 // tervezett one takes their confirmation back. Kiadasok can still be
@@ -123,10 +125,11 @@ type Elszamolas struct {
 	// is calculated.
 	Megerositettek []ElszamolasSzemely
 	Hianyzok       []ElszamolasSzemely
-	// Megerositette tells whether the viewer has confirmed.
+	// Megerositette tells whether the viewer has confirmed (for themselves
+	// and every name-only Vendeg of theirs who is a Resztvevo).
 	Megerositette bool
-	// CanConfirm tells whether the viewer, a Resztvevo who hasn't
-	// confirmed, may confirm now, leaving aside TervezettFizeto.
+	// CanConfirm tells whether the viewer may confirm now (for themselves or
+	// their name-only Vendegek), leaving aside TervezettFizeto.
 	CanConfirm bool
 	// TervezettFizeto are the descriptions of the tervezett Kiadasok the
 	// viewer pays, which block their confirming.
@@ -223,8 +226,8 @@ func (s elszamolasAllas) requireOpen() error {
 	return nil
 }
 
-// hianyzok are the Resztvevok who haven't confirmed. #13: a name-only
-// Vendeg is confirmed by their Tag (see ConfirmKiadasokRecorded).
+// hianyzok are the Resztvevok who haven't confirmed. A name-only Vendeg is
+// confirmed by their Tag (see ConfirmKiadasokRecorded).
 func (s elszamolasAllas) hianyzok() []domain.Resztvevo {
 	out := []domain.Resztvevo{}
 	for _, r := range s.resztvevok {
@@ -258,6 +261,18 @@ func (s elszamolasAllas) anyMegvolt() bool {
 	return false
 }
 
+// confirmsFor are the holders the Felhasznalo's press confirms: themselves
+// if they are a Resztvevo, and the name-only Vendegek they added who are.
+func (s elszamolasAllas) confirmsFor(felhasznaloID string) []domain.ClaimHolder {
+	var out []domain.ClaimHolder
+	for _, r := range s.resztvevok {
+		if r.FelhasznaloID == felhasznaloID || (r.VendegID != "" && r.AddedBy == felhasznaloID) {
+			out = append(out, domain.HolderOf(r))
+		}
+	}
+	return out
+}
+
 // tervezettOf returns the descriptions of the tervezett Kiadasok the
 // Felhasznalo pays.
 func (s elszamolasAllas) tervezettOf(felhasznaloID string) []string {
@@ -282,12 +297,20 @@ func (s elszamolasAllas) view(ctx context.Context, q store.Queries, felhasznaloI
 	if !s.exists() {
 		return nil, nil
 	}
-	me := domain.ClaimHolder{FelhasznaloID: felhasznaloID}
+	mine := s.confirmsFor(felhasznaloID)
+	confirmed, unconfirmed := 0, 0
+	for _, h := range mine {
+		if s.megerositesek[h] {
+			confirmed++
+		} else {
+			unconfirmed++
+		}
+	}
 	out := &Elszamolas{
 		Allapot:         ElszamolasLezajlasElott,
 		Megerositettek:  []ElszamolasSzemely{},
 		Hianyzok:        []ElszamolasSzemely{},
-		Megerositette:   s.megerositesek[me],
+		Megerositette:   len(mine) > 0 && unconfirmed == 0,
 		TervezettFizeto: s.tervezettOf(felhasznaloID),
 		Utalasok:        []UtalasAllas{},
 	}
@@ -317,8 +340,8 @@ func (s elszamolasAllas) view(ctx context.Context, q store.Queries, felhasznaloI
 		}
 	case s.open():
 		out.Allapot = ElszamolasMegerosites
-		out.CanConfirm = holdsResztvevo(s.resztvevok, me) && !out.Megerositette
-		out.CanUnconfirm = out.Megerositette
+		out.CanConfirm = unconfirmed > 0
+		out.CanUnconfirm = confirmed > 0
 		out.CanClose = isSzervezo
 	}
 	for _, r := range s.resztvevok {
@@ -349,11 +372,13 @@ func unconfirmTervezettPayer(ctx context.Context, q store.Queries, esemenyID str
 }
 
 // ConfirmKiadasokRecorded is the Felhasznalo's "Rögzítettem a
-// kiadásaimat". If they were the last one missing, the Elszamolas is
-// calculated in the same transaction. Besides the errors of
+// kiadásaimat", for themselves (a Tag or a Vendeg) and the name-only
+// Vendegek they added. If they were the last ones missing, the Elszamolas
+// is calculated in the same transaction. Besides the errors of
 // requireKiegeszitoOn: ErrElszamolasNotOpen before Lezajlott or without
 // Kiadasok, ErrElszamolasKiszamolva once calculated,
-// ErrElszamolasNotResztvevo for anyone but a Resztvevo, and
+// ErrElszamolasNotResztvevo for anyone who is no Resztvevo and added none,
+// and
 // ErrElszamolasTervezett while they pay a tervezett Kiadas. Confirming
 // again changes nothing.
 func (a *App) ConfirmKiadasokRecorded(ctx context.Context, felhasznaloID, esemenyID string) error {
@@ -370,20 +395,23 @@ func (a *App) ConfirmKiadasokRecorded(ctx context.Context, felhasznaloID, esemen
 		if err := s.requireOpen(); err != nil {
 			return err
 		}
-		me := domain.ClaimHolder{FelhasznaloID: felhasznaloID}
-		if !holdsResztvevo(s.resztvevok, me) {
+		mine := s.confirmsFor(felhasznaloID)
+		if len(mine) == 0 {
 			return ErrElszamolasNotResztvevo
 		}
+		// A name-only Vendeg pays nothing, so only the Tag's own tervezett
+		// Kiadasok block it.
 		if len(s.tervezettOf(felhasznaloID)) > 0 {
 			return ErrElszamolasTervezett
 		}
-		// #13: a Tag's confirmation also confirms their name-only Vendegs:
-		// insert a row for each of them here (megerositette: the Tag), and
-		// check their tervezett Kiadasok too (charged to the Tag).
-		if err := q.InsertElszamolasMegerosites(ctx, e.ID, me, felhasznaloID, a.clock.Now()); err != nil {
-			return err
+		// The press confirms the Felhasznalo and their name-only Vendegek,
+		// each recorded as confirmed by them.
+		for _, h := range mine {
+			if err := q.InsertElszamolasMegerosites(ctx, e.ID, h, felhasznaloID, a.clock.Now()); err != nil {
+				return err
+			}
+			s.megerositesek[h] = true
 		}
-		s.megerositesek[me] = true
 		if len(s.hianyzok()) > 0 {
 			return nil
 		}
@@ -419,11 +447,17 @@ func (a *App) UnconfirmKiadasokRecorded(ctx context.Context, felhasznaloID, esem
 		if err := s.requireOpen(); err != nil {
 			return err
 		}
-		if !holdsResztvevo(s.resztvevok, domain.ClaimHolder{FelhasznaloID: felhasznaloID}) {
+		mine := s.confirmsFor(felhasznaloID)
+		if len(mine) == 0 {
 			return ErrElszamolasNotResztvevo
 		}
-		// #13: also take back the confirmations of their name-only Vendegs.
-		return q.DeleteElszamolasMegerosites(ctx, e.ID, domain.ClaimHolder{FelhasznaloID: felhasznaloID})
+		// Their name-only Vendegek's confirmations go with theirs.
+		for _, h := range mine {
+			if err := q.DeleteElszamolasMegerosites(ctx, e.ID, h); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return err
@@ -601,7 +635,7 @@ func (a *App) calculateElszamolas(ctx context.Context, q store.Queries, s elszam
 		add(b.FelhasznaloID)
 	}
 	for _, r := range s.resztvevok {
-		add(r.FelhasznaloID) // #13: a name-only Vendeg has none to DM
+		add(r.FelhasznaloID) // a name-only Vendeg has none: their Tag has a balance
 	}
 	for _, u := range utalasok {
 		dms[u.FromID].Fizetendo = append(dms[u.FromID].Fizetendo, gateway.ElszamolasUtalas{UtalasID: u.ID, Name: u.ToName, Amount: u.Amount})
@@ -684,8 +718,8 @@ func (a *App) scheduleElszamolasEmlekezteto(ctx context.Context, q store.Queries
 	return a.scheduleJob(ctx, q, jobElszamolasEmlekezteto, esemenyID, endedAt.Add(elszamolasEmlekeztetoDelay), elszamolasEmlekeztetoPayload{})
 }
 
-// runElszamolasEmlekezteto DMs every Resztvevo who hasn't confirmed yet,
-// once, if the Esemeny has an open Elszamolas: Lezajlott, Koltsegek on,
+// runElszamolasEmlekezteto DMs every Resztvevo who hasn't confirmed yet
+// (the Tag of a name-only Vendeg who hasn't), once, if the Esemeny has an open Elszamolas: Lezajlott, Koltsegek on,
 // a Kiadas, not calculated.
 func (a *App) runElszamolasEmlekezteto(ctx context.Context, q store.Queries, j store.Job) (func(context.Context), error) {
 	e, err := q.FindEsemeny(ctx, j.EsemenyID)
@@ -707,10 +741,16 @@ func (a *App) runElszamolasEmlekezteto(ctx context.Context, q store.Queries, j s
 		return nil, nil
 	}
 	var cimzettek []string
+	seen := map[string]bool{}
 	for _, r := range s.hianyzok() {
-		// #13: a name-only Vendeg's Tag confirms for them; remind the Tag.
-		if r.FelhasznaloID != "" {
-			cimzettek = append(cimzettek, r.FelhasznaloID)
+		// A name-only Vendeg's Tag confirms for them: remind the Tag.
+		f := r.FelhasznaloID
+		if r.VendegID != "" {
+			f = r.AddedBy
+		}
+		if f != "" && !seen[f] {
+			seen[f] = true
+			cimzettek = append(cimzettek, f)
 		}
 	}
 	if len(cimzettek) == 0 {

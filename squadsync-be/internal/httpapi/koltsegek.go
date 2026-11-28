@@ -39,7 +39,7 @@ type kiadasJSON struct {
 
 type kiadasReszJSON struct {
 	FelhasznaloID string `json:"felhasznaloId"`
-	// VendegID is a name-only Vendeg's id (#13), "" otherwise.
+	// VendegID is a name-only Vendeg's id, "" otherwise.
 	VendegID string `json:"vendegId"`
 	Name     string `json:"name"`
 	Amount   int    `json:"amount"`
@@ -70,7 +70,7 @@ type koltsegekJSON struct {
 
 type elszamolasSzemelyJSON struct {
 	FelhasznaloID string `json:"felhasznaloId"`
-	// VendegID is a name-only Vendeg's id (#13), "" otherwise.
+	// VendegID is a name-only Vendeg's id, "" otherwise.
 	VendegID string `json:"vendegId"`
 	Name     string `json:"name"`
 }

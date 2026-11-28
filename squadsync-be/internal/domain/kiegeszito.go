@@ -31,18 +31,21 @@ func (k KiegeszitoKind) Valid() bool {
 }
 
 // ClaimHolder is who a claim in a Kiegeszito (a seat, a bed, part of a
-// Tetel, a Szavazas backing) is for: a Felhasznalo, or a name-only Vendeg
-// (#13), whose claims their Tag makes. Exactly one of the two is set.
+// Tetel, a Szavazas backing) is for: a Felhasznalo (a Tag, or a Vendeg who
+// is a Felhasznalo), or a name-only Vendeg, whose claims their Tag makes.
+// Exactly one of the two is set.
 type ClaimHolder struct {
 	FelhasznaloID string
-	// VendegID is a name-only Vendeg's id. #13 fills it in.
+	// VendegID is a name-only Vendeg's id.
 	VendegID string
 }
 
-// HolderOf is the ClaimHolder of a Resztvevo. #13 must return the
-// VendegID of a name-only Vendeg here, once Resztvevo carries it; until
-// then every Resztvevo is a Felhasznalo.
+// HolderOf is the ClaimHolder of a Resztvevo: their VendegID for a
+// name-only Vendeg, their FelhasznaloID otherwise.
 func HolderOf(r Resztvevo) ClaimHolder {
+	if r.VendegID != "" {
+		return ClaimHolder{VendegID: r.VendegID}
+	}
 	return ClaimHolder{FelhasznaloID: r.FelhasznaloID}
 }
 
@@ -63,7 +66,7 @@ type Tetel struct {
 }
 
 // Vallalas is a claim of part of a Tetel's quantity, made by a Resztvevo
-// for themselves or (#13) by a Tag for their name-only Vendeg.
+// for themselves or by a Tag for their name-only Vendeg.
 type Vallalas struct {
 	TetelID string
 	Holder  ClaimHolder

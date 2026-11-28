@@ -18,16 +18,15 @@ type Auto struct {
 }
 
 // Utas is a passenger: someone with a seat in an Auto. A Resztvevo claims
-// one for themselves, a Tag for their name-only Vendeg (#13).
+// one for themselves, a Tag for their name-only Vendeg.
 type Utas struct {
 	AutoID string
 	Holder ClaimHolder
-	// Name is the passenger's name, for showing. A name-only Vendeg's is
-	// empty until #13 joins vendeg here.
+	// Name is the passenger's name (a name-only Vendeg's too), for showing.
 	Name string
 }
 
-// SajatUton marks a Resztvevo (or, #13, a name-only Vendeg) who gets there
+// SajatUton marks a Resztvevo (or a name-only Vendeg) who gets there
 // on their own: they hold no seat and need none.
 type SajatUton struct {
 	Holder ClaimHolder

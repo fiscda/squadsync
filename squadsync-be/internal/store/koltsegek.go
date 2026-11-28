@@ -128,14 +128,17 @@ func (q Queries) SetKiadasReszek(ctx context.Context, kiadasID string, reszek []
 
 // ListKiadasReszekOfEsemeny returns the shares of every Kiadas of the
 // Esemeny, in the stable id order of their holders (Felhasznalok by id,
-// then name-only Vendegs by id). A name-only Vendeg's (#13) has an empty
-// name until #13 joins vendeg here.
+// then name-only Vendegs by id). Each has the holder's name and whom it is
+// charged to: the Felhasznalo themselves, or a name-only Vendeg's Tag.
 func (q Queries) ListKiadasReszekOfEsemeny(ctx context.Context, esemenyID string) ([]domain.KiadasResz, error) {
 	rows, err := q.db.QueryContext(ctx,
-		`SELECT r.kiadas_id, COALESCE(r.felhasznalo_id, ''), COALESCE(r.vendeg_id, ''), COALESCE(f.name, ''), r.amount
+		`SELECT r.kiadas_id, COALESCE(r.felhasznalo_id, ''), COALESCE(r.vendeg_id, ''), COALESCE(f.name, vg.name, ''), r.amount,
+		        COALESCE(r.felhasznalo_id, vg.added_by, ''), COALESCE(f.name, a.name, '')
 		 FROM kiadas_resz r
 		 JOIN kiadas k ON k.id = r.kiadas_id
 		 LEFT JOIN felhasznalo f ON f.id = r.felhasznalo_id
+		 LEFT JOIN vendeg vg ON vg.id = r.vendeg_id
+		 LEFT JOIN felhasznalo a ON a.id = vg.added_by
 		 WHERE k.esemeny_id = ?
 		 ORDER BY r.kiadas_id, r.felhasznalo_id IS NULL, r.felhasznalo_id, r.vendeg_id`,
 		esemenyID,
@@ -147,7 +150,7 @@ func (q Queries) ListKiadasReszekOfEsemeny(ctx context.Context, esemenyID string
 	var list []domain.KiadasResz
 	for rows.Next() {
 		var r domain.KiadasResz
-		if err := rows.Scan(&r.KiadasID, &r.Holder.FelhasznaloID, &r.Holder.VendegID, &r.Name, &r.Amount); err != nil {
+		if err := rows.Scan(&r.KiadasID, &r.Holder.FelhasznaloID, &r.Holder.VendegID, &r.Name, &r.Amount, &r.ChargedTo, &r.ChargedToName); err != nil {
 			return nil, fmt.Errorf("list kiadas reszek: %w", err)
 		}
 		list = append(list, r)

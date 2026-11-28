@@ -189,8 +189,8 @@ func TestBadKiadasInputIsRefused(t *testing.T) {
 		t.Fatalf("splitting with a non-Resztvevo: err = %v, want ErrNotResztvevo", err)
 	}
 	vendeg := []domain.ClaimHolder{{VendegID: "v1"}}
-	if _, err := h.App.AddKiadas(ctx, "anna", d.ID, app.KiadasInput{Description: "x", Amount: 100, Split: &app.SplitInput{Holders: vendeg}}); !errors.Is(err, app.ErrNotFound) {
-		t.Fatalf("splitting with a Vendeg before #13: err = %v, want ErrNotFound", err)
+	if _, err := h.App.AddKiadas(ctx, "anna", d.ID, app.KiadasInput{Description: "x", Amount: 100, Split: &app.SplitInput{Holders: vendeg}}); !errors.Is(err, app.ErrNotResztvevo) {
+		t.Fatalf("splitting with an unknown Vendeg: err = %v, want ErrNotResztvevo", err)
 	}
 	if k := koltsegek(t, h, "anna", d.ID); len(k.Kiadasok) != 0 {
 		t.Fatalf("kiadasok = %+v, want none", k.Kiadasok)
@@ -581,20 +581,5 @@ func TestAnEmptyDescriptionKeepsTheCurrentOneOnEdit(t *testing.T) {
 	}
 	if _, err := h.App.AddKiadas(context.Background(), "bela", d.ID, app.KiadasInput{Amount: 1}); !errors.Is(err, app.ErrInvalidInput) {
 		t.Fatalf("adding without a description: err = %v, want ErrInvalidInput", err)
-	}
-}
-
-func TestBalancesRefuseAVendegShareUntilItsTagIsKnown(t *testing.T) {
-	h, d := tripWithKoltsegek(t)
-	k := addKiadas(t, h, "bela", d.ID, app.KiadasInput{Description: "Bor", Amount: 900})
-	// No use case stores a Vendeg share before #13; write one directly.
-	if err := h.Store.SetKiadasReszek(context.Background(), k.ID, []domain.KiadasResz{
-		{Holder: domain.ClaimHolder{FelhasznaloID: "bela"}, Amount: 450},
-		{Holder: domain.ClaimHolder{VendegID: "v1"}, Amount: 450},
-	}); err != nil {
-		t.Fatalf("SetKiadasReszek: %v", err)
-	}
-	if _, err := h.App.Koltsegek(context.Background(), "bela", d.ID); err == nil {
-		t.Fatalf("Koltsegek with a Vendeg share: want an error, not a balance under an empty id")
 	}
 }

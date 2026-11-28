@@ -100,14 +100,24 @@ type EsemenyDetail struct {
 	Kiegeszitok []KiegeszitoAllapot
 	// Hatarido is the voting deadline, nil for none (see hatarido.go).
 	Hatarido *time.Time
+	// ViewerIsVendeg tells whether the viewer is a Vendeg rather than a
+	// Tag: they see the Esemeny without its Csoport (CsoportName is "").
+	ViewerIsVendeg bool
+	// Vendegek are the Esemeny's Vendegek, ordered by name. Set by Esemeny
+	// only.
+	Vendegek []VendegAllas
 }
 
 // IdopontAllas is an Idopont with how it stands: its counts and Helyezes
-// (both counting only Tags' Visszajelzesek), the viewer's own answer, and
-// every Visszajelzes on it.
+// (both counting only Tags' Visszajelzesek), the Vendegek' counts on top
+// (the headcount, never the Helyezes), the viewer's own answer, and every
+// Visszajelzes on it.
 type IdopontAllas struct {
 	domain.Idopont
 	Igen, Talan, Nem int
+	// VendegIgen, VendegTalan and VendegNem count the Vendegek' answers
+	// (of both kinds), which don't count toward the Helyezes.
+	VendegIgen, VendegTalan, VendegNem int
 	// Helyezes is 0 when no Tag has answered the Idopont.
 	Helyezes Helyezes
 	// Sajat is the viewer's own Visszajelzes, "" if they haven't answered.
@@ -331,16 +341,23 @@ func (a *App) EsemenyekOfCsoport(ctx context.Context, felhasznaloID, csoportID s
 }
 
 // Esemeny returns an Esemeny with its Idopontok, their counts and Helyezes,
-// and the viewer's own Visszajelzesek. Only Tags of its Csoport may see it;
-// anyone else gets ErrNotFound.
+// the viewer's own Visszajelzesek and its Vendegek. Tags of its Csoport and
+// its Vendegek may see it, a Vendeg without the Csoport's name; anyone else
+// gets ErrNotFound.
 func (a *App) Esemeny(ctx context.Context, felhasznaloID, esemenyID string) (EsemenyDetail, error) {
 	q := a.store.Queries
-	e, err := requireEsemenyTag(ctx, q, esemenyID, felhasznaloID)
+	e, role, err := requireEsemenyMember(ctx, q, esemenyID, felhasznaloID)
 	if err != nil {
 		return EsemenyDetail{}, err
 	}
 	d, err := esemenyDetail(ctx, q, e, felhasznaloID)
 	if err != nil {
+		return EsemenyDetail{}, err
+	}
+	if role == roleVendeg {
+		d.ViewerIsVendeg, d.CsoportName = true, ""
+	}
+	if d.Vendegek, err = vendegAllasok(ctx, q, e, felhasznaloID); err != nil {
 		return EsemenyDetail{}, err
 	}
 	d.Kiegeszitok, err = a.kiegeszitoAllapotok(ctx, q, e)
@@ -403,10 +420,20 @@ func idopontAllasok(e domain.Esemeny, idopontok []domain.Idopont, visszajelzesek
 		}
 		allas := &out[n]
 		allas.Visszajelzesek = append(allas.Visszajelzesek, v)
-		if v.FelhasznaloID == viewerID {
+		if viewerID != "" && v.FelhasznaloID == viewerID {
 			allas.Sajat = v.Valasz
 		}
 		if !v.IsTag {
+			if countsAsResztvevo(v) {
+				switch v.Valasz {
+				case domain.Igen:
+					allas.VendegIgen++
+				case domain.Talan:
+					allas.VendegTalan++
+				case domain.Nem:
+					allas.VendegNem++
+				}
+			}
 			continue
 		}
 		switch v.Valasz {
@@ -435,15 +462,23 @@ func idopontAllasok(e domain.Esemeny, idopontok []domain.Idopont, visszajelzesek
 	return out
 }
 
-// SetVisszajelzes records the Felhasznalo's answer to one Idopont of an
-// Esemeny, replacing any earlier answer. Only Tags of the Esemeny's Csoport
-// may answer; anyone else, and an Idopont of another Esemeny, gets
-// ErrNotFound. An Idopont that isn't answerable in the Esemeny's state
+// SetVisszajelzes records the Felhasznalo's own answer to one Idopont of an
+// Esemeny, replacing any earlier answer. Tags of the Esemeny's Csoport and
+// its Vendegek may answer; anyone else, and an Idopont of another Esemeny,
+// gets ErrNotFound. An Idopont that isn't answerable in the Esemeny's state
 // (see answerable) gives ErrIdopontNotAnswerable.
 //
 // A Resztvevo who drops from igen to talan or nem while the Esemeny is
-// Veglegesitve is reported to the Szervezo by DM.
+// Veglegesitve loses their claims in the Kiegeszitok and is reported to the
+// Szervezo by DM.
 func (a *App) SetVisszajelzes(ctx context.Context, felhasznaloID, esemenyID, idopontID string, valasz domain.Valasz) error {
+	return a.setVisszajelzes(ctx, felhasznaloID, esemenyID, idopontID, "", valasz)
+}
+
+// setVisszajelzes is SetVisszajelzes, or with vendegID SetVendegVisszajelzes:
+// the answer is for the caller, or for the name-only Vendeg they added (see
+// answeringFor).
+func (a *App) setVisszajelzes(ctx context.Context, felhasznaloID, esemenyID, idopontID, vendegID string, valasz domain.Valasz) error {
 	if !valasz.Valid() {
 		return fmt.Errorf("%w: a visszajelzes is igen, talan or nem", ErrInvalidInput)
 	}
@@ -451,7 +486,7 @@ func (a *App) SetVisszajelzes(ctx context.Context, felhasznaloID, esemenyID, ido
 	var szervezoID, csoportID string
 	var released []kiegeszitoJob
 	err := a.store.InTx(ctx, func(q store.Queries) error {
-		e, err := requireEsemenyTag(ctx, q, esemenyID, felhasznaloID)
+		e, holder, name, err := answeringFor(ctx, q, esemenyID, felhasznaloID, vendegID)
 		if err != nil {
 			return err
 		}
@@ -465,13 +500,14 @@ func (a *App) SetVisszajelzes(ctx context.Context, felhasznaloID, esemenyID, ido
 		if !answerable(e, i) {
 			return ErrIdopontNotAnswerable
 		}
-		before, err := q.FindValasz(ctx, i.ID, felhasznaloID)
+		before, err := q.FindValasz(ctx, i.ID, holder)
 		if err != nil {
 			return err
 		}
 		if err := q.UpsertVisszajelzes(ctx, domain.Visszajelzes{
 			IdopontID:     i.ID,
-			FelhasznaloID: felhasznaloID,
+			FelhasznaloID: holder.FelhasznaloID,
+			VendegID:      holder.VendegID,
 			Valasz:        valasz,
 			UpdatedAt:     a.clock.Now(),
 		}); err != nil {
@@ -485,15 +521,15 @@ func (a *App) SetVisszajelzes(ctx context.Context, felhasznaloID, esemenyID, ido
 		// this transaction, the Szervezo's own included. #24 removes their
 		// calendar event here too. (Joining, for #24, is
 		// makesResztvevo(e, i, valasz) && !makesResztvevo(e, i, before).)
-		freed, after, err := a.releaseDropOut(ctx, q, e, felhasznaloID)
+		freed, after, err := a.releaseClaims(ctx, q, e, func(h domain.ClaimHolder) bool { return h == holder })
 		if err != nil {
 			return err
 		}
 		released = after
 
 		// The Szervezo dropping out needs no DM to themselves.
-		if felhasznaloID != e.SzervezoID {
-			d, err := a.dropOut(ctx, q, e, felhasznaloID, freed)
+		if holder.FelhasznaloID != e.SzervezoID {
+			d, err := a.dropOut(ctx, q, e, name, freed)
 			if err != nil {
 				return err
 			}
@@ -536,7 +572,9 @@ func answerable(e domain.Esemeny, i domain.Idopont) bool {
 }
 
 // requireEsemenyTag returns the Esemeny if the Felhasznalo is a Tag of its
-// Csoport. Anyone else gets ErrNotFound, whether or not the Esemeny exists.
+// Csoport. Anyone else, a Vendeg included, gets ErrNotFound, whether or not
+// the Esemeny exists. Use it for what only Tags may do; requireEsemenyMember
+// (vendeg.go) lets Vendegek in too.
 func requireEsemenyTag(ctx context.Context, q store.Queries, esemenyID, felhasznaloID string) (domain.Esemeny, error) {
 	e, err := q.FindEsemeny(ctx, esemenyID)
 	if err != nil {

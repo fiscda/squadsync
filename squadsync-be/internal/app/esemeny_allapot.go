@@ -170,7 +170,8 @@ func (a *App) announcement(ctx context.Context, q store.Queries, e domain.Esemen
 // announceAllapot re-renders the Esemeny's Discord messages, then announces
 // the change of its state. With a Csatorna, it posts the announcement there,
 // linked to the Esemeny's post in that channel (or its web page if there
-// is none). Without one, every Tag but the actor gets it by DM.
+// is none). Without one, every Tag but the actor gets it by DM. Vendegek
+// who are Felhasznalok always get it by DM (see announceToVendegek).
 func (a *App) announceAllapot(ctx context.Context, esemenyID, actorID string, ann gateway.Announcement) {
 	a.refreshEsemenyMessages(ctx, esemenyID)
 
@@ -205,6 +206,7 @@ func (a *App) announceAllapot(ctx context.Context, esemenyID, actorID string, an
 	default:
 		a.log.Error("announce esemeny allapot", "esemeny", esemenyID, "err", err)
 	}
+	a.announceToVendegek(ctx, e, actorID, ann)
 }
 
 // channelPost finds the Esemeny's post in the channel, if it has one there.
@@ -222,20 +224,17 @@ func (a *App) channelPost(ctx context.Context, esemenyID, channelID string) (gat
 	return gateway.MessageRef{}, false
 }
 
-// dropOut builds the Szervezo's DM about a Resztvevo who dropped from igen.
+// dropOut builds the Szervezo's DM about a Resztvevo (named name) who
+// dropped from igen.
 // It runs in the transaction of the change; freed is what the drop-out's
 // released claims freed in the Kiegeszitok ("2 db sátor").
-func (a *App) dropOut(ctx context.Context, q store.Queries, e domain.Esemeny, felhasznaloID string, freed []string) (gateway.DropOut, error) {
-	f, err := q.FindFelhasznalo(ctx, felhasznaloID)
-	if err != nil {
-		return gateway.DropOut{}, err
-	}
+func (a *App) dropOut(ctx context.Context, q store.Queries, e domain.Esemeny, name string, freed []string) (gateway.DropOut, error) {
 	csoport, err := q.FindCsoport(ctx, e.CsoportID)
 	if err != nil {
 		return gateway.DropOut{}, err
 	}
 	return gateway.DropOut{
-		Name: f.Name, CsoportName: csoport.Name, Title: e.Title, Link: a.esemenyURL(e.ID),
+		Name: name, CsoportName: csoport.Name, Title: e.Title, Link: a.esemenyURL(e.ID),
 		Felszabadult: strings.Join(freed, ", "),
 	}, nil
 }

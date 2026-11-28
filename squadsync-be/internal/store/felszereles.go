@@ -91,16 +91,17 @@ func (q Queries) ListTetelek(ctx context.Context, esemenyID string) ([]domain.Te
 }
 
 // ListVallalasokOfEsemeny returns every Vallalas on the Esemeny's Tetelek,
-// ordered by the holder's name. A name-only Vendeg's (#13) has an empty
-// name until #13 joins vendeg here.
+// ordered by the holder's name (a name-only
+// Vendeg's by their name too).
 func (q Queries) ListVallalasokOfEsemeny(ctx context.Context, esemenyID string) ([]domain.Vallalas, error) {
 	rows, err := q.db.QueryContext(ctx,
-		`SELECT v.tetel_id, COALESCE(v.felhasznalo_id, ''), COALESCE(v.vendeg_id, ''), COALESCE(f.name, ''), v.quantity
+		`SELECT v.tetel_id, COALESCE(v.felhasznalo_id, ''), COALESCE(v.vendeg_id, ''), COALESCE(f.name, vg.name, ''), v.quantity
 		 FROM tetel_vallalas v
 		 JOIN tetel t ON t.id = v.tetel_id
 		 LEFT JOIN felhasznalo f ON f.id = v.felhasznalo_id
+		 LEFT JOIN vendeg vg ON vg.id = v.vendeg_id
 		 WHERE t.esemeny_id = ?
-		 ORDER BY COALESCE(f.name, ''), v.felhasznalo_id, v.vendeg_id`,
+		 ORDER BY COALESCE(f.name, vg.name, ''), v.felhasznalo_id, v.vendeg_id`,
 		esemenyID,
 	)
 	if err != nil {
