@@ -6,6 +6,8 @@ package gatewayfake
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 	"sync"
 
 	"squadsync-be/internal/gateway"
@@ -296,33 +298,245 @@ func (d *Discord) Edits() []Edit {
 	return append([]Edit(nil), d.edits...)
 }
 
-// CalendarUpsert is one recorded GoogleCalendar.UpsertEvent call.
-type CalendarUpsert struct {
-	FelhasznaloID string
-	Event         gateway.CalendarEvent
+// CalendarCall is one recorded GoogleCalendar call (except the code
+// exchange, see CalendarExchanges).
+type CalendarCall struct {
+	// Op is "create_calendar", "upsert_event", "delete_event" or "revoke".
+	Op           string
+	RefreshToken string
+	CalendarID   string
+	// EventID is set for upsert_event and delete_event.
+	EventID string
+	// Event is set for upsert_event.
+	Event gateway.CalendarEvent
 }
 
-// GoogleCalendar records calendar writes instead of calling Google.
+// FakeCalendar is a calendar the fake Google holds.
+type FakeCalendar struct {
+	ID           string
+	RefreshToken string
+	Name         string
+	TimeZone     string
+	// Deleted is set by DeleteCalendar, as if the owner deleted it.
+	Deleted bool
+}
+
+// GoogleCalendar keeps calendars and events in memory instead of calling
+// Google, and records every call. Codes are answered from a table set up
+// with Authorize; an unknown one is refused with
+// gateway.ErrGoogleCodeRejected. Calendars get predictable ids:
+// "calendar-1", "calendar-2", ...
 type GoogleCalendar struct {
-	mu      sync.Mutex
-	upserts []CalendarUpsert
+	mu        sync.Mutex
+	codes     map[string]string
+	exchanges []CodeExchange
+	calls     []CalendarCall
+	calendars []FakeCalendar
+	events    map[string]map[string]gateway.CalendarEvent
+	revoked   map[string]bool
+	failNext  error
+	during    func()
 }
 
 var _ gateway.GoogleCalendar = (*GoogleCalendar)(nil)
 
-// UpsertEvent records the call.
-func (g *GoogleCalendar) UpsertEvent(_ context.Context, felhasznaloID string, event gateway.CalendarEvent) error {
+// Authorize makes code stand for a Google account that just granted access
+// with the given refresh token, and returns the code.
+func (g *GoogleCalendar) Authorize(code, refreshToken string) string {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.upserts = append(g.upserts, CalendarUpsert{FelhasznaloID: felhasznaloID, Event: event})
+	if g.codes == nil {
+		g.codes = map[string]string{}
+	}
+	g.codes[code] = refreshToken
+	return code
+}
+
+// RevokeAccess makes Google refuse the refresh token from now on, as if
+// its owner revoked the app's access in their Google account.
+func (g *GoogleCalendar) RevokeAccess(refreshToken string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.revoked == nil {
+		g.revoked = map[string]bool{}
+	}
+	g.revoked[refreshToken] = true
+}
+
+// FailNext makes the next call (other than an exchange) fail with err,
+// without doing anything. It is still recorded.
+func (g *GoogleCalendar) FailNext(err error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.failNext = err
+}
+
+// DuringNext runs fn during the next call to create a calendar, upsert or
+// delete an event, before it takes effect: as if something happened while
+// Google was being called.
+func (g *GoogleCalendar) DuringNext(fn func()) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.during = fn
+}
+
+func (g *GoogleCalendar) runDuring() {
+	g.mu.Lock()
+	fn := g.during
+	g.during = nil
+	g.mu.Unlock()
+	if fn != nil {
+		fn()
+	}
+}
+
+// DeleteCalendar deletes a calendar as its owner would in Google.
+func (g *GoogleCalendar) DeleteCalendar(calendarID string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for n := range g.calendars {
+		if g.calendars[n].ID == calendarID {
+			g.calendars[n].Deleted = true
+		}
+	}
+	delete(g.events, calendarID)
+}
+
+// ExchangeCalendarCode records the exchange and answers from the table.
+func (g *GoogleCalendar) ExchangeCalendarCode(_ context.Context, code, redirectURI string) (string, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.exchanges = append(g.exchanges, CodeExchange{Code: code, RedirectURI: redirectURI})
+	token, ok := g.codes[code]
+	if !ok {
+		return "", gateway.ErrGoogleCodeRejected
+	}
+	return token, nil
+}
+
+// start records a call and tells whether it may go ahead (the caller holds
+// the lock).
+func (g *GoogleCalendar) start(c CalendarCall) error {
+	g.calls = append(g.calls, c)
+	if err := g.failNext; err != nil {
+		g.failNext = nil
+		return err
+	}
+	if g.revoked[c.RefreshToken] {
+		return gateway.ErrGoogleTokenRevoked
+	}
 	return nil
 }
 
-// Upserts returns every recorded upsert, in order.
-func (g *GoogleCalendar) Upserts() []CalendarUpsert {
+func (g *GoogleCalendar) calendar(id string) (FakeCalendar, bool) {
+	for _, c := range g.calendars {
+		if c.ID == id && !c.Deleted {
+			return c, true
+		}
+	}
+	return FakeCalendar{}, false
+}
+
+// CreateCalendar records the call and creates the calendar.
+func (g *GoogleCalendar) CreateCalendar(_ context.Context, refreshToken, name, timeZone string) (string, error) {
+	g.runDuring()
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return append([]CalendarUpsert(nil), g.upserts...)
+	if err := g.start(CalendarCall{Op: "create_calendar", RefreshToken: refreshToken}); err != nil {
+		return "", err
+	}
+	id := fmt.Sprintf("calendar-%d", len(g.calendars)+1)
+	g.calendars = append(g.calendars, FakeCalendar{ID: id, RefreshToken: refreshToken, Name: name, TimeZone: timeZone})
+	g.calls[len(g.calls)-1].CalendarID = id
+	return id, nil
+}
+
+// UpsertEvent records the call and stores the event.
+func (g *GoogleCalendar) UpsertEvent(_ context.Context, refreshToken, calendarID string, event gateway.CalendarEvent) error {
+	g.runDuring()
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if err := g.start(CalendarCall{Op: "upsert_event", RefreshToken: refreshToken, CalendarID: calendarID, EventID: event.ID, Event: event}); err != nil {
+		return err
+	}
+	c, ok := g.calendar(calendarID)
+	if !ok || c.RefreshToken != refreshToken {
+		return gateway.ErrGoogleCalendarGone
+	}
+	if g.events == nil {
+		g.events = map[string]map[string]gateway.CalendarEvent{}
+	}
+	if g.events[calendarID] == nil {
+		g.events[calendarID] = map[string]gateway.CalendarEvent{}
+	}
+	g.events[calendarID][event.ID] = event
+	return nil
+}
+
+// DeleteEvent records the call and deletes the event.
+func (g *GoogleCalendar) DeleteEvent(_ context.Context, refreshToken, calendarID, eventID string) error {
+	g.runDuring()
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if err := g.start(CalendarCall{Op: "delete_event", RefreshToken: refreshToken, CalendarID: calendarID, EventID: eventID}); err != nil {
+		return err
+	}
+	delete(g.events[calendarID], eventID)
+	return nil
+}
+
+// RevokeCalendarToken records the call and makes the token refused.
+func (g *GoogleCalendar) RevokeCalendarToken(_ context.Context, refreshToken string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if err := g.start(CalendarCall{Op: "revoke", RefreshToken: refreshToken}); err != nil {
+		return err
+	}
+	if g.revoked == nil {
+		g.revoked = map[string]bool{}
+	}
+	g.revoked[refreshToken] = true
+	return nil
+}
+
+// CalendarExchanges returns every recorded code exchange, in order.
+func (g *GoogleCalendar) CalendarExchanges() []CodeExchange {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]CodeExchange(nil), g.exchanges...)
+}
+
+// Calls returns every recorded call of the given ops (all with none), in
+// order.
+func (g *GoogleCalendar) Calls(ops ...string) []CalendarCall {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	out := []CalendarCall{}
+	for _, c := range g.calls {
+		if len(ops) == 0 || slices.Contains(ops, c.Op) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// Calendars returns every calendar created, in order.
+func (g *GoogleCalendar) Calendars() []FakeCalendar {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]FakeCalendar(nil), g.calendars...)
+}
+
+// Events returns the events now in the calendar, ordered by id.
+func (g *GoogleCalendar) Events(calendarID string) []gateway.CalendarEvent {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	out := []gateway.CalendarEvent{}
+	for _, e := range g.events[calendarID] {
+		out = append(out, e)
+	}
+	slices.SortFunc(out, func(a, b gateway.CalendarEvent) int { return strings.Compare(a.ID, b.ID) })
+	return out
 }
 
 // Spotify records playlist operations instead of calling Spotify. Created

@@ -66,6 +66,9 @@ func (a *App) ConfirmIdopont(ctx context.Context, felhasznaloID, esemenyID, idop
 		if err := a.scheduleVeglegesitve(ctx, q, e, i); err != nil {
 			return err
 		}
+		if err := a.syncNaptarOfEsemeny(ctx, q, e.ID); err != nil {
+			return err
+		}
 		ann, err = a.announcement(ctx, q, e, veglegesitveHeadline, idopontLabel(i, a.clock.Now()))
 		return err
 	})
@@ -99,6 +102,9 @@ func (a *App) ReopenEgyeztetes(ctx context.Context, felhasznaloID, esemenyID str
 			return err
 		}
 		if err := cancelVeglegesitve(ctx, q, e.ID); err != nil {
+			return err
+		}
+		if err := a.syncNaptarOfEsemeny(ctx, q, e.ID); err != nil {
 			return err
 		}
 		ann, err = a.announcement(ctx, q, e, ujraEgyeztetesHeadline, "")
@@ -147,6 +153,9 @@ func (a *App) cancelInTx(ctx context.Context, q store.Queries, e domain.Esemeny)
 		return gateway.Announcement{}, err
 	}
 	if err := cancelVeglegesitve(ctx, q, e.ID); err != nil {
+		return gateway.Announcement{}, err
+	}
+	if err := a.syncNaptarOfEsemeny(ctx, q, e.ID); err != nil {
 		return gateway.Announcement{}, err
 	}
 	return a.announcement(ctx, q, e, elmaradtHeadline, "")

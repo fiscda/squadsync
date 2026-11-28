@@ -201,6 +201,70 @@ export async function unlinkDiscordAccount(
   );
 }
 
+// --- Google Naptár (ADR-0005) ---
+
+/** A Felhasználó's Google Calendar connection, as Go reports it. */
+export type GoogleNaptar = {
+  /**
+   * not_configured: the server has no Google credentials; broken: Google
+   * refused the token, so they must connect again.
+   */
+  state: "not_configured" | "disconnected" | "connected" | "broken";
+  /** RFC 3339, UTC; null when disconnected. */
+  connectedAt: string | null;
+};
+
+/** The Felhasználó's Google Calendar connection. */
+export function getGoogleNaptar(felhasznaloId: string): Promise<GoogleNaptar> {
+  return callBackend(felhasznaloId, "GET", "/felhasznalo/google-naptar");
+}
+
+export type GoogleConnectOutcome =
+  | "connected"
+  /** Google refused the code (expired, reused, wrong redirect URI). */
+  | "code-rejected"
+  /** Go isn't configured for Google Calendar. */
+  | "unavailable";
+
+/**
+ * Finishes connecting Google Calendar: Go exchanges the code from Google's
+ * redirect, using its own redirect URI (BETTER_AUTH_URL +
+ * /fiok/google/callback), stores the token and starts syncing.
+ */
+export async function connectGoogleNaptar(
+  felhasznaloId: string,
+  code: string,
+): Promise<GoogleConnectOutcome> {
+  try {
+    await callBackend<void>(
+      felhasznaloId,
+      "POST",
+      "/felhasznalo/google-naptar",
+      { code },
+    );
+    return "connected";
+  } catch (err) {
+    if (err instanceof BackendError && err.status === 400) {
+      return "code-rejected";
+    }
+    if (err instanceof BackendError && err.status === 503) {
+      return "unavailable";
+    }
+    throw err;
+  }
+}
+
+/** Disconnects Google Calendar. Disconnecting when not connected is fine. */
+export async function disconnectGoogleNaptar(
+  felhasznaloId: string,
+): Promise<void> {
+  await callBackend<void>(
+    felhasznaloId,
+    "DELETE",
+    "/felhasznalo/google-naptar",
+  );
+}
+
 /** Whether a Discord account may log in to the web, and if not, why. */
 export type WebLoginCheck = {
   allowed: boolean;

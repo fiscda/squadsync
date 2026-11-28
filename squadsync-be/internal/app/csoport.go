@@ -295,7 +295,11 @@ func (a *App) deleteTag(ctx context.Context, q store.Queries, csoportID, targetI
 		left.esemenyIDs = append(left.esemenyIDs, s.ID)
 		left.jobs = append(left.jobs, jobs...)
 	}
-	return left, q.DeleteTag(ctx, csoportID, targetID)
+	if err := q.DeleteTag(ctx, csoportID, targetID); err != nil {
+		return tagLeft{}, err
+	}
+	// No longer a Resztvevo anywhere in the Csoport: their calendar events go.
+	return left, a.syncNaptarOfTagLeft(ctx, q, csoportID, targetID)
 }
 
 // requireOtherAdmin gives ErrLastAdmin unless the Csoport has at least two
@@ -458,12 +462,16 @@ func (a *App) JoinCsoport(ctx context.Context, felhasznaloID, token string) (Joi
 		if err != nil {
 			return err
 		}
-		return q.InsertTag(ctx, domain.Tag{
+		if err := q.InsertTag(ctx, domain.Tag{
 			CsoportID:     csoport.ID,
 			FelhasznaloID: felhasznaloID,
 			Admin:         tags == 0,
 			CreatedAt:     a.clock.Now(),
-		})
+		}); err != nil {
+			return err
+		}
+		// Someone who comes back is a Resztvevo again where they said igen.
+		return a.backfillNaptar(ctx, q, felhasznaloID)
 	})
 	if err != nil {
 		return JoinResult{}, err

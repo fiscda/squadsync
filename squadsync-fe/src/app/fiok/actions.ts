@@ -2,7 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
-import { BackendError, unlinkDiscordAccount } from "@/lib/backend";
+import {
+  BackendError,
+  disconnectGoogleNaptar,
+  unlinkDiscordAccount,
+} from "@/lib/backend";
 import { requireFelhasznalo } from "@/lib/felhasznalo";
 
 /**
@@ -25,5 +29,15 @@ export async function unlinkDiscordAccountAction(discordId: string) {
       throw err;
     }
   }
+  revalidatePath("/fiok");
+}
+
+/**
+ * Disconnects Google Calendar: Go stops syncing, forgets the token and
+ * revokes it. The "Squad Sync" calendar stays in their Google account.
+ */
+export async function disconnectGoogleNaptarAction() {
+  const felhasznalo = await requireFelhasznalo();
+  await disconnectGoogleNaptar(felhasznalo.id);
   revalidatePath("/fiok");
 }

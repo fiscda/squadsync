@@ -477,14 +477,18 @@ func (a *App) SetVisszajelzes(ctx context.Context, felhasznaloID, esemenyID, ido
 		}); err != nil {
 			return err
 		}
+		// Joining or dropping out changes their calendar event (#24).
+		if makesResztvevo(e, i, before) != makesResztvevo(e, i, valasz) {
+			if err := a.requestNaptarSync(ctx, q, e.ID, felhasznaloID); err != nil {
+				return err
+			}
+		}
 		droppedOut := makesResztvevo(e, i, before) && !makesResztvevo(e, i, valasz)
 		if !droppedOut {
 			return nil
 		}
 		// The drop-out's claims in every Kiegeszito are released here, in
-		// this transaction, the Szervezo's own included. #24 removes their
-		// calendar event here too. (Joining, for #24, is
-		// makesResztvevo(e, i, valasz) && !makesResztvevo(e, i, before).)
+		// this transaction, the Szervezo's own included.
 		freed, after, err := a.releaseDropOut(ctx, q, e, felhasznaloID)
 		if err != nil {
 			return err

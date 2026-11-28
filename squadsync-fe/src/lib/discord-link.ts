@@ -39,7 +39,8 @@ export function isHttps(): boolean {
   return publicUrl().startsWith("https://");
 }
 
-function publicUrl(): string {
+/** The web app's public URL (BETTER_AUTH_URL), without a trailing slash. */
+export function publicUrl(): string {
   const url = process.env.BETTER_AUTH_URL?.replace(/\/+$/, "");
   if (!url) {
     throw new Error("BETTER_AUTH_URL is not set (see .env.example)");

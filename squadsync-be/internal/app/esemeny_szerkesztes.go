@@ -58,7 +58,10 @@ func (a *App) EditEsemeny(ctx context.Context, felhasznaloID, esemenyID string, 
 		if err != nil {
 			return err
 		}
-		return q.UpdateEsemenyDetails(ctx, e.ID, d.Title, d.Description, d.Helyszin)
+		if err := q.UpdateEsemenyDetails(ctx, e.ID, d.Title, d.Description, d.Helyszin); err != nil {
+			return err
+		}
+		return a.syncNaptarOfEsemeny(ctx, q, e.ID)
 	})
 	if err != nil {
 		return err
