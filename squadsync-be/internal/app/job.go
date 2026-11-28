@@ -63,6 +63,9 @@ const (
 	jobLezajlott   jobKind = "lezajlott"
 	jobEmlekezteto jobKind = "emlekezteto"
 	jobHatarido    jobKind = "hatarido"
+	// jobElszamolasEmlekezteto reminds the unconfirmed, 3 days after
+	// Lezajlott, to confirm their Kiadasok (elszamolas.go).
+	jobElszamolasEmlekezteto jobKind = "elszamolas_emlekezteto"
 )
 
 // jobHandler runs one due job in its transaction. after, if not nil, runs
@@ -84,6 +87,8 @@ func (a *App) jobHandlers() map[jobKind]jobHandler {
 		jobLezajlott:   a.runLezajlott,
 		jobEmlekezteto: a.runEmlekezteto,
 		jobHatarido:    a.runHatarido,
+
+		jobElszamolasEmlekezteto: a.runElszamolasEmlekezteto,
 	}
 }
 

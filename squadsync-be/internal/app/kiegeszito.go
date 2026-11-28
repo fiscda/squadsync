@@ -86,8 +86,8 @@ import (
 // edits or deletes it, Resztvevo or not. It registers vetoSwitchOff (not while it has Kiadasok)
 // and no releaseClaims (Kiadasok are never touched automatically). Its
 // switchable also allows Lezajlott, so a Szervezo who forgot can switch it
-// on after the trip. See app/koltsegek.go (requireKiadasWrite, and the
-// kiadasokLocked seam #22 fills in).
+// on after the trip. See app/koltsegek.go (requireKiadasokOpen) and
+// app/elszamolas.go (the Elszamolas, and kiadasokLocked).
 
 // Errors of the Kiegeszito framework, shared by every Kiegeszito.
 var (

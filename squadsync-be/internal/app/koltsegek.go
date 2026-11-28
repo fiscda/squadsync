@@ -16,7 +16,8 @@ import (
 // each with a payer, an amount in whole HUF, a description and the people
 // it is split among (equally, or in custom amounts that add up to it). A
 // Kiadas is either tervezett (an estimate) or kifizetve (the real amount);
-// only kifizetve ones count in the balances (and, #22, in the Elszamolas).
+// only kifizetve ones count in the balances and in the Elszamolas
+// (elszamolas.go).
 //
 // Who may do what:
 //   - Kiadasok are recorded, edited and deleted only while the Esemeny is
@@ -58,7 +59,7 @@ var (
 	// Esemeny's state: only in Veglegesitve and Lezajlott.
 	ErrKoltsegekClosed = errors.New("kiadasok can be changed only while the esemeny is veglegesitve or lezajlott")
 	// ErrKiadasokLocked means an Elszamolas has been calculated, so the
-	// Kiadasok can't change (#22).
+	// Kiadasok can't change (see elszamolas.go).
 	ErrKiadasokLocked = errors.New("the kiadasok are locked by the elszamolas")
 	// ErrKiadasNotResztvevo means a Kiadas write names someone who isn't a
 	// Resztvevo: the one adding it, a new payer or a new split member. It
@@ -109,6 +110,9 @@ type Koltsegek struct {
 	Tervezett int
 	// CanAdd tells whether the viewer may add a Kiadas now.
 	CanAdd bool
+	// Elszamolas is the Elszamolas as the viewer sees it, nil while the
+	// Esemeny has none (no Kiadas, or Egyeztetes or Elmaradt).
+	Elszamolas *Elszamolas
 }
 
 // KiadasAllas is a Kiadas with its split.
@@ -157,16 +161,15 @@ func koltsegekSummary(ctx context.Context, t *kiegeszitoTx) (string, error) {
 	if err != nil || n == 0 {
 		return "", err
 	}
-	return fmt.Sprintf("🧾 %d Kiadás", n), nil
-}
-
-// kiadasokLocked tells whether the Esemeny's Kiadasok are locked because an
-// Elszamolas has been calculated.
-//
-// #22: return true here while the Esemeny has a calculated (not reopened)
-// Elszamolas.
-func kiadasokLocked(_ context.Context, _ store.Queries, _ string) (bool, error) {
-	return false, nil
+	s := fmt.Sprintf("🧾 %d Kiadás", n)
+	elszamolas, err := elszamolasSummary(ctx, t.q, t.e)
+	if err != nil {
+		return "", err
+	}
+	if elszamolas != "" {
+		s += " · " + elszamolas
+	}
+	return s, nil
 }
 
 // requireKiadasokOpen is Koltsegek's guard (see the top of kiegeszito.go):
@@ -248,14 +251,19 @@ func (a *App) Koltsegek(ctx context.Context, felhasznaloID, esemenyID string) (K
 		if err != nil {
 			return err
 		}
-		resztvevok, err := koltsegekResztvevok(ctx, q, e)
+		s, err := readElszamolas(ctx, q, e)
+		if err != nil {
+			return err
+		}
+		elszamolas, err := s.view(ctx, q, felhasznaloID)
 		if err != nil {
 			return err
 		}
 		out = Koltsegek{
 			Kiadasok:   kiadasok,
 			Egyenlegek: egyenlegek,
-			CanAdd:     open && holdsResztvevo(resztvevok, domain.ClaimHolder{FelhasznaloID: felhasznaloID}),
+			CanAdd:     open && holdsResztvevo(s.resztvevok, domain.ClaimHolder{FelhasznaloID: felhasznaloID}),
+			Elszamolas: elszamolas,
 		}
 		for n := range out.Kiadasok {
 			k := &out.Kiadasok[n]
@@ -299,7 +307,7 @@ func koltsegekAllas(ctx context.Context, q store.Queries, esemenyID string) ([]K
 // egyenlegekOf computes everyone's balance over the kifizetve Kiadasok:
 // what they paid, their share and the net (paid - share). Tervezett ones
 // don't count. It never returns nil; the Netto values add up to 0. The
-// Elszamolas (#22) turns these into transfers.
+// Elszamolas turns these into Utalasok (utalasokOf).
 func egyenlegekOf(kiadasok []KiadasAllas) ([]Egyenleg, error) {
 	byID := map[string]*Egyenleg{}
 	get := func(id, name string) *Egyenleg {
@@ -524,6 +532,9 @@ func (a *App) AddKiadas(ctx context.Context, felhasznaloID, esemenyID string, in
 		if err := q.InsertKiadas(ctx, k); err != nil {
 			return err
 		}
+		if err := unconfirmTervezettPayer(ctx, q, e.ID, k); err != nil {
+			return err
+		}
 		return q.SetKiadasReszek(ctx, k.ID, reszek)
 	})
 	if err != nil {
@@ -584,7 +595,7 @@ func (a *App) UpdateKiadas(ctx context.Context, felhasznaloID, esemenyID, kiadas
 		return err
 	}
 	err = a.store.InTx(ctx, func(q store.Queries) error {
-		_, k, resztvevok, err := editableKiadas(ctx, q, esemenyID, kiadasID, felhasznaloID)
+		e, k, resztvevok, err := editableKiadas(ctx, q, esemenyID, kiadasID, felhasznaloID)
 		if err != nil {
 			return err
 		}
@@ -608,6 +619,9 @@ func (a *App) UpdateKiadas(ctx context.Context, felhasznaloID, esemenyID, kiadas
 		updated.Description, updated.Amount, updated.PayerID = in.Description, in.Amount, in.PayerID
 		updated.Allapot, updated.Egyenlo, updated.UpdatedAt = in.Allapot, egyenlo, a.clock.Now()
 		if err := q.UpdateKiadas(ctx, updated); err != nil {
+			return err
+		}
+		if err := unconfirmTervezettPayer(ctx, q, e.ID, updated); err != nil {
 			return err
 		}
 		return q.SetKiadasReszek(ctx, k.ID, reszek)

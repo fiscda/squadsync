@@ -8,4 +8,5 @@ func (r *Router) registerAll() {
 	r.Command(r.esemenyCommand())
 	r.Modal(esemenyModalRoute, r.proposeFromModal)
 	r.Component(veglegesitesRoute, r.confirmButton)
+	r.Component(megvoltRoute, r.megvoltButton)
 }

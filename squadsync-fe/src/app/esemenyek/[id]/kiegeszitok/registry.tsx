@@ -40,6 +40,21 @@ export const kiegeszitoRegistry: Record<
         "A fizető és a megosztás új tagjai csak a mostani résztvevők közül lehetnek.",
       koltsegek_split_sum:
         "Az egyedi összegeknek pontosan ki kell adniuk a kiadás teljes összegét.",
+      koltsegek_elszamolas_not_open:
+        "Az elszámolás csak lezajlott eseménynél nyílik meg, és csak ha van legalább egy kiadás.",
+      koltsegek_elszamolas_tervezett:
+        "Amíg te vagy egy tervezett kiadás fizetője, nem jelezheted, hogy rögzítetted a kiadásaidat. Jelöld kifizetettnek a valódi összeggel, vagy töröld.",
+      koltsegek_elszamolas_not_resztvevo:
+        "A kiadások rögzítését csak a résztvevők jelezhetik.",
+      koltsegek_elszamolas_kiszamolva:
+        "Az elszámolás közben elkészült, ezen már nem lehet változtatni.",
+      koltsegek_elszamolas_not_kiszamolva:
+        "Az elszámolás még nem készült el, így nincs mit újranyitni.",
+      koltsegek_elszamolas_megvolt:
+        "Az elszámolást már nem lehet újranyitni, mert egy utalás megvoltnak van jelölve.",
+      koltsegek_elszamolva:
+        "Minden utalás megvolt, az esemény el van számolva: ezen már nem lehet változtatni.",
+      koltsegek_not_szervezo: "Ezt csak az esemény szervezője teheti meg.",
     },
   },
   autok: {

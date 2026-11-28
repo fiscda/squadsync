@@ -32,6 +32,10 @@ type DM struct {
 	Hatarido *gateway.HataridoDM
 	// Auto is set for a passenger's DM that their Auto is gone.
 	Auto *gateway.AutoDM
+	// ElszamolasEmlekezteto is set for the reminder to confirm Kiadasok.
+	ElszamolasEmlekezteto *gateway.ElszamolasEmlekezteto
+	// Elszamolas is set for a Felhasznalo's result of an Elszamolas.
+	Elszamolas *gateway.ElszamolasDM
 	// Szallas is set for a sleeper's DM that their Szoba is gone.
 	Szallas *gateway.SzallasDM
 }
@@ -204,6 +208,28 @@ func (d *Discord) SendAutoDM(_ context.Context, discordID string, a gateway.Auto
 		return d.fail
 	}
 	d.dms = append(d.dms, DM{DiscordID: discordID, Auto: &a})
+	return nil
+}
+
+// SendElszamolasEmlekeztetoDM records the message.
+func (d *Discord) SendElszamolasEmlekeztetoDM(_ context.Context, discordID string, e gateway.ElszamolasEmlekezteto) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.fail != nil {
+		return d.fail
+	}
+	d.dms = append(d.dms, DM{DiscordID: discordID, ElszamolasEmlekezteto: &e})
+	return nil
+}
+
+// SendElszamolasDM records the message.
+func (d *Discord) SendElszamolasDM(_ context.Context, discordID string, e gateway.ElszamolasDM) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.fail != nil {
+		return d.fail
+	}
+	d.dms = append(d.dms, DM{DiscordID: discordID, Elszamolas: &e})
 	return nil
 }
 
