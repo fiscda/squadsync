@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { KiegeszitoKind } from "@/lib/backend";
+import { AutokPanel } from "./autok/panel";
 import { FelszerelesPanel } from "./felszereles/panel";
 import { KoltsegekPanel } from "./koltsegek/panel";
 import type { KiegeszitoPanelProps } from "./panel-props";
@@ -40,7 +41,21 @@ export const kiegeszitoRegistry: Record<
         "Az egyedi összegeknek pontosan ki kell adniuk a kiadás teljes összegét.",
     },
   },
-  autok: { label: "Autók", icon: "🚗", Panel: null },
+  autok: {
+    label: "Autók",
+    icon: "🚗",
+    Panel: AutokPanel,
+    hibak: {
+      autok_full: "Ebben az autóban már nincs szabad hely.",
+      autok_already_sofor: "Már ajánlottál egy autót.",
+      autok_sofor_cant_ride:
+        "A sofőr nem ülhet másik autóba, és nem lehet „saját úton” sem.",
+      autok_already_seated:
+        "Már van helyed egy autóban. Előbb szállj ki, utána szállhatsz be máshova.",
+      autok_seats_below_utasok:
+        "Az autóban több utas ül, mint ahány helyet megadtál.",
+    },
+  },
   szallas: { label: "Szállás", icon: "🛏", Panel: null },
   felszereles: {
     label: "Felszerelés",

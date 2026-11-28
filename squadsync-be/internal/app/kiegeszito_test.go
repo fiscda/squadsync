@@ -139,7 +139,7 @@ func TestOnlyTheSzervezoSwitchesKiegeszitok(t *testing.T) {
 			t.Errorf("SetKiegeszito by %s: err = %v, want %v", who, err, want)
 		}
 	}
-	for _, kind := range []domain.KiegeszitoKind{"sorok", domain.Autok} { // Autok isn't built yet
+	for _, kind := range []domain.KiegeszitoKind{"sorok", domain.LejatszasiLista} { // LejatszasiLista isn't built yet
 		if err := h.App.SetKiegeszito(ctx, "anna", e.ID, kind, true); !errors.Is(err, app.ErrInvalidInput) {
 			t.Errorf("SetKiegeszito(%s): err = %v, want ErrInvalidInput", kind, err)
 		}

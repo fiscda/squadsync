@@ -30,6 +30,8 @@ type DM struct {
 	Emlekezteto *gateway.Emlekezteto
 	// Hatarido is set for the Szervezo's DM when the voting Hatarido passed.
 	Hatarido *gateway.HataridoDM
+	// Auto is set for a passenger's DM that their Auto is gone.
+	Auto *gateway.AutoDM
 }
 
 // AnnouncementPost is one announcement posted in a channel.
@@ -189,6 +191,17 @@ func (d *Discord) SendHataridoDM(_ context.Context, discordID string, h gateway.
 		return d.fail
 	}
 	d.dms = append(d.dms, DM{DiscordID: discordID, Hatarido: &h})
+	return nil
+}
+
+// SendAutoDM records the message.
+func (d *Discord) SendAutoDM(_ context.Context, discordID string, a gateway.AutoDM) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.fail != nil {
+		return d.fail
+	}
+	d.dms = append(d.dms, DM{DiscordID: discordID, Auto: &a})
 	return nil
 }
 
