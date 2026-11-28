@@ -233,7 +233,8 @@ export type AllapotHiba =
   | "nincs_jog"
   | "not_egyeztetes"
   | "idopont_has_answers"
-  | "last_idopont";
+  | "last_idopont"
+  | "masolas";
 
 /** The notice for a refusal (403 or 409) of Go, or null for another error. */
 function hibaOf(err: BackendError): AllapotHiba | null {
@@ -329,8 +330,13 @@ export async function copyEsemenyAction(esemenyId: string) {
     newId = (await copyEsemeny(felhasznalo.id, esemenyId)).id;
   } catch (err) {
     unstable_rethrow(err);
-    if (err instanceof BackendError && err.status === 404) {
-      redirect("/csoportok");
+    if (err instanceof BackendError) {
+      if (err.status === 404) {
+        redirect("/csoportok");
+      }
+      // Anything else (such as Go being down): a notice, not an error page.
+      const hiba: AllapotHiba = "masolas";
+      redirect(`/esemenyek/${esemenyId}?hiba=${hiba}`);
     }
     throw err;
   }

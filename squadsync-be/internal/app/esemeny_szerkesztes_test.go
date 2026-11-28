@@ -330,10 +330,23 @@ func TestTheLastIdopontAndOtherStatesRefuseRemoval(t *testing.T) {
 	if _, err := h.App.AddIdopont(ctx, "anna", e.ID, app.IdopontInput{Start: "2026-12-30T18:00"}); err != nil {
 		t.Fatal(err)
 	}
+	b, err := h.App.AddIdopont(ctx, "bela", e.ID, app.IdopontInput{Start: "2026-12-31T18:00"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	belas := b.ID
 	d = detail(t, h, "anna", e.ID)
 	confirm(t, h, "anna", d, 0)
 	if err := h.App.RemoveIdopont(ctx, "anna", e.ID, d.Idopontok[1].ID); !errors.Is(err, app.ErrNotEgyeztetes) {
 		t.Fatalf("removing in Veglegesitve: err = %v, want ErrNotEgyeztetes", err)
+	}
+	// A Tag who may never remove it gets the permission error, whatever the state.
+	if err := h.App.RemoveIdopont(ctx, "bela", e.ID, d.Idopontok[1].ID); !errors.Is(err, app.ErrNotPermitted) {
+		t.Fatalf("another Tag removing in Veglegesitve: err = %v, want ErrNotPermitted", err)
+	}
+	// The adder is refused by the state.
+	if err := h.App.RemoveIdopont(ctx, "bela", e.ID, belas); !errors.Is(err, app.ErrNotEgyeztetes) {
+		t.Fatalf("the adder removing in Veglegesitve: err = %v, want ErrNotEgyeztetes", err)
 	}
 }
 

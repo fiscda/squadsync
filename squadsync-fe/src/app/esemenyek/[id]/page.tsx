@@ -8,7 +8,6 @@ import { cardClass, linkClass, secondaryButtonClass } from "@/lib/ui";
 import {
   type AllapotHiba,
   confirmIdopontAction,
-  copyEsemenyAction,
   reopenEgyeztetesAction,
   setVisszajelzesAction,
 } from "../actions";
@@ -23,6 +22,7 @@ import {
 import { MAX_IDOPONTOK } from "../limits";
 import { AddIdopont } from "./add-idopont";
 import { CancelEsemeny } from "./cancel-esemeny";
+import { CopyEsemeny } from "./copy-esemeny";
 import { EditEsemeny } from "./edit-esemeny";
 import { HataridoForm } from "./hatarido-form";
 import { kiegeszitoHibaText } from "./kiegeszitok/registry";
@@ -56,6 +56,7 @@ const hibaText: Record<AllapotHiba, string> = {
   idopont_has_answers:
     "Erre az időpontra már válaszoltak, ezért csak az esemény szervezője törölheti.",
   last_idopont: "Az utolsó időpontot nem lehet törölni.",
+  masolas: "Az esemény másolása most nem sikerült. Próbáld újra később.",
 };
 
 function isAllapotHiba(value: unknown): value is AllapotHiba {
@@ -179,11 +180,7 @@ async function Esemeny({
       </section>
 
       <section className="flex flex-col gap-2">
-        <form action={copyEsemenyAction.bind(null, esemeny.id)}>
-          <button type="submit" className={secondaryButtonClass}>
-            Másolás egy héttel későbbre
-          </button>
-        </form>
+        <CopyEsemeny esemenyId={esemeny.id} />
         <p className="text-sm text-zinc-500">
           Új esemény jön létre ugyanezzel a címmel, helyszínnel és bekapcsolt
           kiegészítőkkel, az időpontok egy héttel későbbre téve. Te leszel a

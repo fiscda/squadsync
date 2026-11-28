@@ -151,15 +151,16 @@ func (a *App) RemoveIdopont(ctx context.Context, felhasznaloID, esemenyID, idopo
 }
 
 // removeIdopontError is the one place that decides whether actorID may
-// remove the Idopont now, given how many Idopontok the Esemeny has and how
+// remove the Idopont now (permission first, then the state), given how many Idopontok the Esemeny has and how
 // many Visszajelzesek this one has. RemoveIdopont refuses with it and the
 // web shows the remove button where it is nil (IdopontAllas.Removable).
 func removeIdopontError(e domain.Esemeny, idopontCount int, actorID string, i domain.Idopont, answered int) error {
 	switch {
-	case e.Allapot != domain.Egyeztetes:
-		return ErrNotEgyeztetes
+	// Permission first: a Tag who may never remove it gets 403 in any state.
 	case actorID != e.SzervezoID && i.AddedBy != actorID:
 		return ErrNotPermitted
+	case e.Allapot != domain.Egyeztetes:
+		return ErrNotEgyeztetes
 	case actorID != e.SzervezoID && answered > 0:
 		return ErrIdopontHasAnswers
 	case idopontCount <= 1:
