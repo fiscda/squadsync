@@ -718,3 +718,10 @@ func TestStateChangesReachVendegekByDM(t *testing.T) {
 		}
 	}
 }
+
+func TestAVendegCantBecomeTheSzervezo(t *testing.T) {
+	w := newVendegWorld(t)
+	answer(t, w.h, "vera", w.d, 0, domain.Igen)
+	answerFor(t, w, "bela", w.nagyi, 0, domain.Igen)
+	expectErr(t, "handing over to Vera", w.h.App.HandOverSzervezo(context.Background(), "anna", w.d.ID, "vera"), app.ErrNotEligibleSzervezo)
+}

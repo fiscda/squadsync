@@ -1,7 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import type { EsemenyDetail, Idopont, Valasz } from "@/lib/backend";
+import {
+  type EsemenyDetail,
+  type Idopont,
+  resztvevoKey,
+  type Valasz,
+} from "@/lib/backend";
 import { getSzervezoEsemenyek } from "@/lib/csoport";
 import { getEsemeny } from "@/lib/esemeny";
 import { requireFelhasznalo } from "@/lib/felhasznalo";
@@ -31,6 +36,7 @@ import { kiegeszitoHibaText } from "./kiegeszitok/registry";
 import { KiegeszitokSection } from "./kiegeszitok/section";
 import { IdopontRaeresLine } from "./raeres-line";
 import { RemoveIdopont } from "./remove-idopont";
+import { VendegekSection, vendegHibaText } from "./vendegek/section";
 
 export default function EsemenyPage({
   params,
@@ -91,19 +97,28 @@ async function Esemeny({
         (e) => e.id === esemeny.id,
       )?.utodok ?? [])
     : [];
+  // A Vendég sees this Esemény only: nothing of its Csoport, and nothing
+  // that only Tags may do.
+  const isVendeg = esemeny.viewerIsVendeg;
   const notice = isAllapotHiba(hiba)
     ? hibaText[hiba]
-    : kiegeszitoHibaText(hiba);
+    : (vendegHibaText(hiba) ?? kiegeszitoHibaText(hiba));
 
   return (
     <>
       <div className="flex flex-col gap-2">
-        <Link
-          href={`/csoportok/${esemeny.csoportId}`}
-          className={`${linkClass} text-sm`}
-        >
-          ← {esemeny.csoportName}
-        </Link>
+        {isVendeg ? (
+          <p className="text-sm text-zinc-500">
+            Vendégként vagy meghívva erre az eseményre.
+          </p>
+        ) : (
+          <Link
+            href={`/csoportok/${esemeny.csoportId}`}
+            className={`${linkClass} text-sm`}
+          >
+            ← {esemeny.csoportName}
+          </Link>
+        )}
         <h1 className="text-3xl font-semibold tracking-tight">
           {esemeny.title}
         </h1>
@@ -172,7 +187,7 @@ async function Esemeny({
         <h2 className="text-xl font-semibold">Időpontok</h2>
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
           Budapesti idő szerint. A helyezést a tagok igen, majd talán, majd
-          kevesebb nem válaszai döntik el.
+          kevesebb nem válaszai döntik el; a vendégeké nem számít bele.
         </p>
         <ul className="flex flex-col gap-3">
           {esemeny.idopontok.map((idopont) => (
@@ -182,23 +197,31 @@ async function Esemeny({
               idopont={idopont}
               canConfirm={isSzervezo && esemeny.allapot === "egyeztetes"}
               dimmed={hasResztvevok && !idopont.confirmed}
+              showRaeres={!isVendeg}
             />
           ))}
         </ul>
-        {esemeny.allapot === "egyeztetes" &&
+        {!isVendeg &&
+        esemeny.allapot === "egyeztetes" &&
         esemeny.idopontok.length < MAX_IDOPONTOK ? (
           <AddIdopont esemenyId={esemeny.id} />
         ) : null}
       </section>
 
-      <section className="flex flex-col gap-2">
-        <CopyEsemeny esemenyId={esemeny.id} />
-        <p className="text-sm text-zinc-500">
-          Új esemény jön létre ugyanezzel a címmel, helyszínnel és bekapcsolt
-          kiegészítőkkel, az időpontok egy héttel későbbre téve. Te leszel a
-          szervezője.
-        </p>
-      </section>
+      {isVendeg ? null : (
+        <VendegekSection esemeny={esemeny} felhasznaloId={felhasznalo.id} />
+      )}
+
+      {isVendeg ? null : (
+        <section className="flex flex-col gap-2">
+          <CopyEsemeny esemenyId={esemeny.id} />
+          <p className="text-sm text-zinc-500">
+            Új esemény jön létre ugyanezzel a címmel, helyszínnel és bekapcsolt
+            kiegészítőkkel, az időpontok egy héttel későbbre téve. Te leszel a
+            szervezője.
+          </p>
+        </section>
+      )}
 
       <KiegeszitokSection
         esemeny={esemeny}
@@ -274,12 +297,17 @@ function Resztvevok({ esemeny }: { esemeny: EsemenyDetail }) {
       ) : (
         <ul className="flex flex-wrap gap-2">
           {esemeny.resztvevok.map((r) => (
-            // Name-only Vendégs (#13) have no felhasznaloId: they need another key.
             <li
-              key={r.felhasznaloId}
+              key={resztvevoKey(r)}
               className="rounded-full bg-green-100 px-3 py-1 text-sm text-green-900 dark:bg-green-950 dark:text-green-200"
             >
               {r.name}
+              {r.isVendeg ? (
+                <span className="text-green-700 dark:text-green-400">
+                  {" "}
+                  (vendég)
+                </span>
+              ) : null}
             </li>
           ))}
         </ul>
@@ -289,6 +317,11 @@ function Resztvevok({ esemeny }: { esemeny: EsemenyDetail }) {
 }
 
 const valaszok: Valasz[] = ["igen", "talan", "nem"];
+
+/** A Tags' count with the Vendégek' on top, e.g. "3 (+1 vendég)". */
+function withVendegek(tagok: number, vendegek: number): string {
+  return vendegek > 0 ? `${tagok} (+${vendegek} vendég)` : String(tagok);
+}
 
 const selectedClass: Record<Valasz, string> = {
   igen: "border-green-600 bg-green-600 text-white",
@@ -301,11 +334,14 @@ function IdopontCard({
   idopont,
   canConfirm,
   dimmed,
+  showRaeres,
 }: {
   esemenyId: string;
   idopont: Idopont;
   canConfirm: boolean;
   dimmed: boolean;
+  /** Ráérés is for Tags only: a Vendég sees nobody's. */
+  showRaeres: boolean;
 }) {
   const highlight = idopont.confirmed
     ? "border-2 border-green-600 dark:border-green-500"
@@ -330,20 +366,30 @@ function IdopontCard({
           {idopont.helyezes === null ? "–" : `${idopont.helyezes}.`}
         </span>
       </div>
-      <IdopontRaeresLine
-        esemenyId={esemenyId}
-        idopontId={idopont.id}
-        answerable={idopont.answerable}
-      />
+      {showRaeres ? (
+        <IdopontRaeresLine
+          esemenyId={esemenyId}
+          idopontId={idopont.id}
+          answerable={idopont.answerable}
+        />
+      ) : null}
       <p className="text-sm text-zinc-600 dark:text-zinc-400">
-        Igen: {idopont.igen} · Talán: {idopont.talan} · Nem: {idopont.nem}
+        Igen: {withVendegek(idopont.igen, idopont.vendegIgen)} · Talán:{" "}
+        {withVendegek(idopont.talan, idopont.vendegTalan)} · Nem:{" "}
+        {withVendegek(idopont.nem, idopont.vendegNem)}
       </p>
       {idopont.visszajelzesek.length > 0 ? (
         <ul className="flex flex-col gap-1 text-sm">
           {valaszok.map((valasz) => {
             const names = idopont.visszajelzesek
               .filter((v) => v.valasz === valasz)
-              .map((v) => (v.isTag ? v.name : `${v.name} (nem tag)`));
+              .map((v) =>
+                v.isTag
+                  ? v.name
+                  : v.isVendeg
+                    ? `${v.name} (vendég)`
+                    : `${v.name} (nem tag)`,
+              );
             return names.length > 0 ? (
               <li key={valasz}>
                 <span className="text-zinc-500">{valaszLabel[valasz]}:</span>{" "}

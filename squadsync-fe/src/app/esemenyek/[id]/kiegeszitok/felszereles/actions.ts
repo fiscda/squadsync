@@ -50,14 +50,18 @@ export async function deleteTetelAction(esemenyId: string, tetelId: string) {
   );
 }
 
-/** Sets the caller's claim on a Tétel; the form's quantity 0 removes it. */
+/**
+ * Sets the caller's claim on a Tétel, or, with the form's vendegId, their
+ * name-only Vendég's; the form's quantity 0 removes it.
+ */
 export async function setVallalasAction(
   esemenyId: string,
   tetelId: string,
   formData: FormData,
 ) {
   const quantity = wholeNumber(Number(formData.get("quantity") ?? ""));
+  const vendegId = String(formData.get("vendegId") ?? "");
   await runKiegeszitoChange(esemenyId, (felhasznaloId) =>
-    setVallalas(felhasznaloId, esemenyId, tetelId, quantity),
+    setVallalas(felhasznaloId, esemenyId, tetelId, quantity, vendegId),
   );
 }

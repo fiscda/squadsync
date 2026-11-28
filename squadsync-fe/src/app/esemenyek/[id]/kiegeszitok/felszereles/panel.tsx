@@ -1,6 +1,10 @@
+import type { Resztvevo } from "@/lib/backend";
 import { getFelszereles, type TetelAllas } from "@/lib/kiegeszito/felszereles";
 import { secondaryButtonClass } from "@/lib/ui";
-import type { KiegeszitoPanelProps } from "../panel-props";
+import {
+  type KiegeszitoPanelProps,
+  sajatVendegResztvevok,
+} from "../panel-props";
 import {
   addTetelAction,
   deleteTetelAction,
@@ -12,13 +16,17 @@ const inputClass =
   "rounded-lg border border-zinc-300 bg-transparent px-3 py-1.5 text-sm dark:border-zinc-700";
 
 /** Felszerelés: the Tételek to bring, their claims and what is missing. */
-export async function FelszerelesPanel({ esemeny }: KiegeszitoPanelProps) {
+export async function FelszerelesPanel({
+  esemeny,
+  felhasznaloId,
+}: KiegeszitoPanelProps) {
   const felszereles = await getFelszereles(esemeny.id);
   if (felszereles === null) {
     return null;
   }
   const { tetelek, hianyzik, emlekezteto, canAdd, canClaim } = felszereles;
   const claimable = tetelek.some((t) => !t.mindenkiHozza);
+  const vendegek = sajatVendegResztvevok(esemeny, felhasznaloId);
 
   return (
     <div className="flex flex-col gap-4">
@@ -51,6 +59,7 @@ export async function FelszerelesPanel({ esemeny }: KiegeszitoPanelProps) {
                 esemenyId={esemeny.id}
                 tetel={tetel}
                 canClaim={canClaim}
+                vendegek={vendegek}
               />
             ))}
           </ul>
@@ -100,10 +109,13 @@ function TetelItem({
   esemenyId,
   tetel,
   canClaim,
+  vendegek,
 }: {
   esemenyId: string;
   tetel: TetelAllas;
   canClaim: boolean;
+  /** The viewer's name-only Vendégek who are Résztvevők. */
+  vendegek: Resztvevo[];
 }) {
   const maxClaim = tetel.hianyzik + tetel.sajat;
   return (
@@ -156,6 +168,55 @@ function TetelItem({
           ) : null}
         </div>
       ) : null}
+
+      {tetel.mindenkiHozza
+        ? null
+        : vendegek.map((v) => {
+            const sajat =
+              tetel.vallalasok.find((x) => x.vendegId === v.vendegId)
+                ?.quantity ?? 0;
+            const max = tetel.hianyzik + sajat;
+            if (max === 0) {
+              return null;
+            }
+            return (
+              <div
+                key={v.vendegId}
+                className="flex flex-wrap items-center gap-2 text-sm"
+              >
+                <span className="text-zinc-500">{v.name} nevében:</span>
+                <form
+                  action={setVallalasAction.bind(null, esemenyId, tetel.id)}
+                  className="flex items-center gap-2"
+                >
+                  <input type="hidden" name="vendegId" value={v.vendegId} />
+                  <input
+                    name="quantity"
+                    type="number"
+                    min={1}
+                    max={max}
+                    defaultValue={sajat > 0 ? sajat : max}
+                    aria-label={`${tetel.name}: hány darabot hoz ${v.name}`}
+                    className={`${inputClass} w-20`}
+                  />
+                  <button type="submit" className={secondaryButtonClass}>
+                    {sajat > 0 ? "Módosítom" : "Vállalja"}
+                  </button>
+                </form>
+                {sajat > 0 ? (
+                  <form
+                    action={setVallalasAction.bind(null, esemenyId, tetel.id)}
+                  >
+                    <input type="hidden" name="vendegId" value={v.vendegId} />
+                    <input type="hidden" name="quantity" value="0" />
+                    <button type="submit" className={secondaryButtonClass}>
+                      Visszavonom
+                    </button>
+                  </form>
+                ) : null}
+              </div>
+            );
+          })}
 
       {tetel.canEdit ? (
         <details className="text-sm">

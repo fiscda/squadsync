@@ -1,7 +1,10 @@
 import type { Resztvevo } from "@/lib/backend";
 import { type AutoAllas, getAutok, type Szemely } from "@/lib/kiegeszito/autok";
 import { secondaryButtonClass } from "@/lib/ui";
-import type { KiegeszitoPanelProps } from "../panel-props";
+import {
+  type KiegeszitoPanelProps,
+  sajatVendegResztvevok,
+} from "../panel-props";
 import {
   addUzemanyagAction,
   claimUlesAction,
@@ -12,6 +15,7 @@ import {
   setSajatUtonAction,
   updateAutoAction,
 } from "./actions";
+import { VendegUlesek } from "./vendeg-ulesek";
 
 const inputClass =
   "rounded-lg border border-zinc-300 bg-transparent px-3 py-1.5 text-sm dark:border-zinc-700";
@@ -171,6 +175,12 @@ export async function AutokPanel({
           </button>
         </form>
       ) : null}
+
+      <VendegUlesek
+        esemenyId={esemeny.id}
+        autok={autok}
+        vendegek={sajatVendegResztvevok(esemeny, felhasznaloId)}
+      />
     </div>
   );
 }
@@ -408,11 +418,13 @@ function UzemanyagForm({
                 defaultValue={payerDefault}
                 className={inputClass}
               >
-                {resztvevok.map((r) => (
-                  <option key={r.felhasznaloId} value={r.felhasznaloId}>
-                    {r.name}
-                  </option>
-                ))}
+                {resztvevok
+                  .filter((r) => r.felhasznaloId !== "")
+                  .map((r) => (
+                    <option key={r.felhasznaloId} value={r.felhasznaloId}>
+                      {r.name}
+                    </option>
+                  ))}
               </select>
             </label>
           </div>

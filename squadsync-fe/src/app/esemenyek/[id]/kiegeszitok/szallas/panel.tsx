@@ -5,7 +5,10 @@ import {
   type SzobaAllas,
 } from "@/lib/kiegeszito/szallas";
 import { secondaryButtonClass } from "@/lib/ui";
-import type { KiegeszitoPanelProps } from "../panel-props";
+import {
+  type KiegeszitoPanelProps,
+  sajatVendegResztvevok,
+} from "../panel-props";
 import {
   addAgyAction,
   addSzobaAction,
@@ -20,6 +23,7 @@ import {
   updateAgyAction,
 } from "./actions";
 import { ConfirmDelete } from "./confirm-delete";
+import { VendegAgyak } from "./vendeg-agyak";
 
 const inputClass =
   "rounded-lg border border-zinc-300 bg-transparent px-3 py-1.5 text-sm dark:border-zinc-700";
@@ -35,7 +39,10 @@ function szemelyKey(s: Szemely): string {
 }
 
 /** Szállás: the Szobák and Ágyak, who sleeps where, and who has no bed. */
-export async function SzallasPanel({ esemeny }: KiegeszitoPanelProps) {
+export async function SzallasPanel({
+  esemeny,
+  felhasznaloId,
+}: KiegeszitoPanelProps) {
   const szallas = await getSzallas(esemeny.id);
   if (szallas === null) {
     return null;
@@ -181,6 +188,12 @@ export async function SzallasPanel({ esemeny }: KiegeszitoPanelProps) {
           </button>
         </form>
       ) : null}
+
+      <VendegAgyak
+        esemenyId={esemeny.id}
+        szallas={szallas}
+        vendegek={sajatVendegResztvevok(esemeny, felhasznaloId)}
+      />
     </div>
   );
 }

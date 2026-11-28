@@ -34,11 +34,16 @@ function kiadasInput(formData: FormData): KiadasInput {
       formData.get("allapot") === "tervezett" ? "tervezett" : "kifizetve",
     split: {
       egyenlo: !egyedi,
-      reszek: formData.getAll("resz").map((id) => ({
-        felhasznaloId: String(id),
-        vendegId: "",
-        amount: egyedi ? wholeNumber(formData.get(`osszeg_${id}`)) : 0,
-      })),
+      // A name-only Vendég's key is "v:<vendegId>" (see resztvevoKey).
+      reszek: formData.getAll("resz").map((value) => {
+        const id = String(value);
+        const vendeg = id.startsWith("v:");
+        return {
+          felhasznaloId: vendeg ? "" : id,
+          vendegId: vendeg ? id.slice(2) : "",
+          amount: egyedi ? wholeNumber(formData.get(`osszeg_${id}`)) : 0,
+        };
+      }),
     },
   };
 }
