@@ -52,3 +52,32 @@ export const valaszLabel: Record<Valasz, string> = {
   talan: "Talán",
   nem: "Nem",
 };
+
+const localPartsFormat = new Intl.DateTimeFormat("en-CA", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+  timeZone: "Europe/Budapest",
+});
+
+/**
+ * A UTC time as Budapest date and time input values, e.g. { date:
+ * "2026-12-05", time: "20:00" }.
+ */
+export function toLocalInputs(iso: string): { date: string; time: string } {
+  const parts = Object.fromEntries(
+    localPartsFormat.formatToParts(new Date(iso)).map((p) => [p.type, p.value]),
+  );
+  return {
+    date: `${parts.year}-${parts.month}-${parts.day}`,
+    time: `${parts.hour}:${parts.minute}`,
+  };
+}
+
+/** A moment as Budapest local time, e.g. "2026. március 5., csütörtök 20:00". */
+export function formatMoment(iso: string): string {
+  return dateTimeFormat.format(new Date(iso));
+}

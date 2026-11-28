@@ -11,6 +11,7 @@ import {
   renameCsoport,
   revokeCsoportMeghivo,
   setCsoportMuted,
+  setEmlekeztetok,
   setTagAdmin,
   unlinkCsatorna,
 } from "@/lib/backend";
@@ -123,6 +124,41 @@ export async function renameCsoportAction(
     if (err instanceof BackendError) {
       if (err.status === 400) {
         return { error: "A csoport neve legfeljebb 60 karakter lehet." };
+      }
+      if (err.status === 403) {
+        return { error: NOT_ADMIN };
+      }
+      if (err.status === 404) {
+        redirect("/csoportok");
+      }
+    }
+    throw err;
+  }
+  revalidatePath(`/csoportok/${csoportId}`);
+  return {};
+}
+
+/**
+ * Sets the Csoport's Emlékeztető offsets from the checked "perc" boxes.
+ * Admins only.
+ */
+export async function setEmlekeztetokAction(
+  csoportId: string,
+  _previous: CsoportActionState,
+  formData: FormData,
+): Promise<CsoportActionState> {
+  const felhasznalo = await requireFelhasznalo();
+  const percek = formData.getAll("perc").map((v) => Number(v));
+  if (percek.some((p) => !Number.isInteger(p))) {
+    return { error: "Ismeretlen időzítés." };
+  }
+  try {
+    await setEmlekeztetok(felhasznalo.id, csoportId, percek);
+  } catch (err) {
+    unstable_rethrow(err);
+    if (err instanceof BackendError) {
+      if (err.status === 400) {
+        return { error: "Ismeretlen időzítés." };
       }
       if (err.status === 403) {
         return { error: NOT_ADMIN };

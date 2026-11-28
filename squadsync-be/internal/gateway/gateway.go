@@ -39,6 +39,42 @@ type DiscordMessenger interface {
 	// SendDropOutDM tells one Discord account of the Szervezo that a
 	// Resztvevo dropped out.
 	SendDropOutDM(ctx context.Context, discordID string, d DropOut) error
+	// SendEmlekeztetoDM reminds one Discord account of a confirmed Esemeny
+	// that is coming up.
+	SendEmlekeztetoDM(ctx context.Context, discordID string, e Emlekezteto) error
+	// SendHataridoDM tells one Discord account of the Szervezo that the
+	// voting Hatarido of an Esemeny passed, with how its Idopontok stand
+	// and, if they fit, a confirm button for each.
+	SendHataridoDM(ctx context.Context, discordID string, h HataridoDM) error
+}
+
+// Emlekezteto reminds a Resztvevo of the confirmed Idopont of an Esemeny.
+// Its fields are plain text; the bot words and escapes them.
+type Emlekezteto struct {
+	CsoportName string
+	Title       string
+	// Idopont is the confirmed Idopont's Budapest time, ready to show.
+	Idopont string
+	// Link is the Esemeny's web page. It may be a localhost URL, shown as
+	// text.
+	Link string
+}
+
+// HataridoDM tells the Szervezo that the voting Hatarido passed. Its fields
+// are plain text; the bot words and escapes them.
+type HataridoDM struct {
+	EsemenyID   string
+	CsoportName string
+	Title       string
+	// Idopontok are every Idopont, best Helyezes first.
+	Idopontok []IdopontLine
+	// ConfirmButtons asks for one confirm button per Idopont. It is set
+	// only when they fit (at most MaxAnswerRows); otherwise the Szervezo
+	// confirms on the web, at Link.
+	ConfirmButtons bool
+	// Link is the Esemeny's web page. It may be a localhost URL, shown as
+	// text.
+	Link string
 }
 
 // Announcement is a short plain-text message about a public moment of an
@@ -240,6 +276,16 @@ func (Disabled) SendAnnouncementDM(context.Context, string, Announcement) error 
 
 // SendDropOutDM implements DiscordMessenger.
 func (Disabled) SendDropOutDM(context.Context, string, DropOut) error {
+	return ErrNotConfigured
+}
+
+// SendEmlekeztetoDM implements DiscordMessenger.
+func (Disabled) SendEmlekeztetoDM(context.Context, string, Emlekezteto) error {
+	return ErrNotConfigured
+}
+
+// SendHataridoDM implements DiscordMessenger.
+func (Disabled) SendHataridoDM(context.Context, string, HataridoDM) error {
 	return ErrNotConfigured
 }
 

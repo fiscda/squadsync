@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import type { CsoportDetail } from "@/lib/backend";
 import { getCsoport, getCsoportMeghivok } from "@/lib/csoport";
+import { emlekeztetoLabel } from "@/lib/emlekezteto";
 import { requireFelhasznalo } from "@/lib/felhasznalo";
 import {
   buttonClass,
@@ -19,6 +20,7 @@ import {
 } from "../actions";
 import { CopyLink } from "./copy-link";
 import { LeaveControl, RenameForm, TagControls } from "./csoport-admin";
+import { EmlekeztetoForm } from "./emlekezteto-form";
 import { EsemenySection } from "./esemeny-section";
 import { RaeresHeatmap } from "./raeres-heatmap";
 
@@ -99,6 +101,8 @@ async function Csoport({ csoportId }: { csoportId: string }) {
 
       <MeghivoSection csoportId={csoport.id} />
 
+      <EmlekeztetoSection csoport={csoport} />
+
       <BeallitasokSection csoport={csoport} />
     </>
   );
@@ -127,6 +131,28 @@ function BeallitasokSection({ csoport }: { csoport: CsoportDetail }) {
         </form>
       </div>
       <LeaveControl csoportId={csoport.id} />
+    </section>
+  );
+}
+
+function EmlekeztetoSection({ csoport }: { csoport: CsoportDetail }) {
+  return (
+    <section className="flex flex-col gap-3">
+      <h2 className="text-xl font-semibold">Emlékeztetők</h2>
+      <p className="text-sm text-zinc-600 dark:text-zinc-400">
+        A véglegesített események előtt DM-ben emlékeztetjük azokat, akik igent
+        vagy talánt mondtak a végleges időpontra.
+        {csoport.emlekeztetoPercek.length === 0
+          ? " Most nincs beállítva emlékeztető."
+          : ` Most: ${csoport.emlekeztetoPercek.map(emlekeztetoLabel).join(", ")}.`}
+      </p>
+      {csoport.admin && (
+        <EmlekeztetoForm
+          key={csoport.emlekeztetoPercek.join(",")}
+          csoportId={csoport.id}
+          percek={csoport.emlekeztetoPercek}
+        />
+      )}
     </section>
   );
 }

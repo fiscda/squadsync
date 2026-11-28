@@ -63,6 +63,9 @@ func (a *App) ConfirmIdopont(ctx context.Context, felhasznaloID, esemenyID, idop
 		if released, err = a.releaseNonResztvevok(ctx, q, confirmed); err != nil {
 			return err
 		}
+		if err := a.scheduleVeglegesitve(ctx, q, e, i); err != nil {
+			return err
+		}
 		ann, err = a.announcement(ctx, q, e, veglegesitveHeadline, idopontLabel(i, a.clock.Now()))
 		return err
 	})
@@ -95,6 +98,9 @@ func (a *App) ReopenEgyeztetes(ctx context.Context, felhasznaloID, esemenyID str
 		if err := q.UpdateEsemenyAllapot(ctx, e.ID, domain.Egyeztetes, ""); err != nil {
 			return err
 		}
+		if err := cancelVeglegesitve(ctx, q, e.ID); err != nil {
+			return err
+		}
 		ann, err = a.announcement(ctx, q, e, ujraEgyeztetesHeadline, "")
 		return err
 	})
@@ -123,6 +129,9 @@ func (a *App) CancelEsemeny(ctx context.Context, felhasznaloID, esemenyID string
 		// The stored confirmed Idopont stays, only as a record; nothing reads
 		// it in Elmaradt (see confirmedIdopont).
 		if err := q.UpdateEsemenyAllapot(ctx, e.ID, domain.Elmaradt, e.ConfirmedIdopontID); err != nil {
+			return err
+		}
+		if err := cancelVeglegesitve(ctx, q, e.ID); err != nil {
 			return err
 		}
 		ann, err = a.announcement(ctx, q, e, elmaradtHeadline, "")

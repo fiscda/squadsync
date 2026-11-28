@@ -9,6 +9,7 @@ import {
   type EsemenyInput,
   proposeEsemeny,
   reopenEgyeztetes,
+  setHatarido,
   setVisszajelzes,
   type Valasz,
 } from "@/lib/backend";
@@ -37,7 +38,13 @@ export async function proposeEsemenyAction(
     description: text("description"),
     helyszin: { name: text("helyszinName"), url: text("helyszinUrl") },
     idopontok: [],
+    hatarido: "",
   };
+  const hatarido = hataridoFrom(formData);
+  if ("error" in hatarido) {
+    return hatarido;
+  }
+  input.hatarido = hatarido.value;
   if (input.title === "") {
     return { error: "Adj címet az eseménynek." };
   }
@@ -116,6 +123,9 @@ export async function proposeEsemenyAction(
             "Az egyik időpont nem létezik az óraátállítás miatt (pl. március végén 02:00 és 03:00 között). Válassz másik időt.",
         };
       }
+      if (err.status === 400 && err.code === "hatarido_not_future") {
+        return { error: hataridoNotFuture };
+      }
       if (err.status === 400) {
         return {
           error:
@@ -126,6 +136,87 @@ export async function proposeEsemenyAction(
     throw err;
   }
   redirect(`/esemenyek/${esemenyId}`);
+}
+
+const hataridoNotFuture = "A szavazási határidő a jövőben legyen.";
+
+/**
+ * The optional voting Határidő from the form's hataridoDate and
+ * hataridoTime fields (Budapest local time): "" when both are empty.
+ */
+function hataridoFrom(
+  formData: FormData,
+): { value: string } | { error: string } {
+  const date = String(formData.get("hataridoDate") ?? "").trim();
+  const time = String(formData.get("hataridoTime") ?? "").trim();
+  if (date === "" && time === "") {
+    return { value: "" };
+  }
+  if (date === "" || time === "") {
+    return { error: "A határidőhöz add meg a napot és az időt is." };
+  }
+  return { value: `${date}T${time}` };
+}
+
+export type HataridoState = { error?: string };
+
+/**
+ * The Szervező sets or changes the voting Határidő, or clears it when the
+ * form was sent with intent=clear.
+ */
+export async function setHataridoAction(
+  esemenyId: string,
+  _previous: HataridoState,
+  formData: FormData,
+): Promise<HataridoState> {
+  const felhasznalo = await requireFelhasznalo();
+  let value = "";
+  if (formData.get("intent") !== "clear") {
+    const hatarido = hataridoFrom(formData);
+    if ("error" in hatarido) {
+      return hatarido;
+    }
+    if (hatarido.value === "") {
+      return { error: "Add meg a határidő napját és idejét." };
+    }
+    value = hatarido.value;
+  }
+  try {
+    await setHatarido(felhasznalo.id, esemenyId, value);
+  } catch (err) {
+    unstable_rethrow(err);
+    if (err instanceof BackendError) {
+      if (err.status === 404) {
+        redirect("/csoportok");
+      }
+      if (err.status === 422) {
+        return {
+          error:
+            "Ez az időpont nem létezik az óraátállítás miatt. Válassz másik időt.",
+        };
+      }
+      if (err.status === 400) {
+        return {
+          error:
+            err.code === "hatarido_not_future"
+              ? hataridoNotFuture
+              : "Ez az időpont nem létezik vagy hibás.",
+        };
+      }
+      if (err.status === 403 || err.status === 409) {
+        revalidatePath(`/esemenyek/${esemenyId}`);
+        return {
+          error:
+            err.status === 403
+              ? "Ezt csak az esemény szervezője teheti meg."
+              : "Határidőt csak egyeztetés alatt lehet beállítani.",
+        };
+      }
+    }
+    throw err;
+  }
+  revalidatePath(`/esemenyek/${esemenyId}`);
+  return {};
 }
 
 // Server actions are public endpoints: the bound valasz can't be trusted.

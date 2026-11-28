@@ -91,6 +91,8 @@ type esemenyDetailJSON struct {
 	Resztvevok []resztvevoJSON `json:"resztvevok"`
 	// Kiegeszitok are every Kiegeszito that exists, in display order.
 	Kiegeszitok []kiegeszitoJSON `json:"kiegeszitok"`
+	// Hatarido is the voting deadline, null for none.
+	Hatarido *time.Time `json:"hatarido"`
 }
 
 func toEsemenyJSON(e domain.Esemeny) esemenyJSON {
@@ -152,6 +154,8 @@ func (s *server) proposeEsemeny(w http.ResponseWriter, r *http.Request, felhaszn
 			End        string `json:"end"`
 			EgeszNapos bool   `json:"egeszNapos"`
 		} `json:"idopontok"`
+		// Hatarido is an optional Budapest wall clock time, "" for none.
+		Hatarido string `json:"hatarido"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
@@ -160,6 +164,7 @@ func (s *server) proposeEsemeny(w http.ResponseWriter, r *http.Request, felhaszn
 		Title:       body.Title,
 		Description: body.Description,
 		Helyszin:    domain.Helyszin{Name: body.Helyszin.Name, URL: body.Helyszin.URL},
+		Hatarido:    body.Hatarido,
 	}
 	for _, i := range body.Idopontok {
 		in.Idopontok = append(in.Idopontok, app.IdopontInput{Start: i.Start, End: i.End, EgeszNapos: i.EgeszNapos})
@@ -207,6 +212,7 @@ func (s *server) getEsemeny(w http.ResponseWriter, r *http.Request, felhasznaloI
 		Resztvevok:         resztvevok,
 		ConfirmedIdopontID: nullable(d.ConfirmedIdopont),
 		Kiegeszitok:        toKiegeszitokJSON(d.Kiegeszitok),
+		Hatarido:           d.Hatarido,
 	})
 }
 
@@ -264,6 +270,9 @@ func (s *server) setVisszajelzes(w http.ResponseWriter, r *http.Request, felhasz
 }
 
 func (s *server) writeEsemenyError(w http.ResponseWriter, r *http.Request, err error) {
+	if writeHataridoNotFuture(w, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, app.ErrIdopontNotAnswerable), errors.Is(err, app.ErrInvalidTransition):
 		writeError(w, http.StatusConflict, err.Error())
