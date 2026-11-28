@@ -119,6 +119,9 @@ type IdopontAllas struct {
 	// Confirmed marks the Esemeny's confirmed Idopont while it is
 	// Veglegesitve or Lezajlott (not once Elmaradt).
 	Confirmed bool
+	// Removable tells whether the viewer may remove it now (see
+	// removeIdopontError).
+	Removable bool
 }
 
 // ProposeEsemeny creates an Esemeny in the Csoport with its Idopontok. The
@@ -155,20 +158,37 @@ func (a *App) ProposeEsemeny(ctx context.Context, felhasznaloID, csoportID strin
 	return e, nil
 }
 
-// newEsemeny validates a proposal and builds its rows.
-func (a *App) newEsemeny(felhasznaloID, csoportID string, in EsemenyInput) (domain.Esemeny, []domain.Idopont, error) {
+// EsemenyDetailsInput is the editable details of an Esemeny.
+type EsemenyDetailsInput struct {
+	Title       string
+	Description string
+	Helyszin    domain.Helyszin
+}
+
+// validDetails trims and checks an Esemeny's title, description and
+// Helyszin: the rules of proposing and of editing.
+func validDetails(in EsemenyDetailsInput) (EsemenyDetailsInput, error) {
 	title := strings.TrimSpace(in.Title)
 	if title == "" {
-		return domain.Esemeny{}, nil, fmt.Errorf("%w: an esemeny needs a title", ErrInvalidInput)
+		return EsemenyDetailsInput{}, fmt.Errorf("%w: an esemeny needs a title", ErrInvalidInput)
 	}
 	if utf8.RuneCountInString(title) > MaxEsemenyTitleLength {
-		return domain.Esemeny{}, nil, fmt.Errorf("%w: a title is at most %d characters", ErrInvalidInput, MaxEsemenyTitleLength)
+		return EsemenyDetailsInput{}, fmt.Errorf("%w: a title is at most %d characters", ErrInvalidInput, MaxEsemenyTitleLength)
 	}
 	description := strings.TrimSpace(in.Description)
 	if utf8.RuneCountInString(description) > MaxEsemenyDescriptionLength {
-		return domain.Esemeny{}, nil, fmt.Errorf("%w: a description is at most %d characters", ErrInvalidInput, MaxEsemenyDescriptionLength)
+		return EsemenyDetailsInput{}, fmt.Errorf("%w: a description is at most %d characters", ErrInvalidInput, MaxEsemenyDescriptionLength)
 	}
 	helyszin, err := validHelyszin(in.Helyszin)
+	if err != nil {
+		return EsemenyDetailsInput{}, err
+	}
+	return EsemenyDetailsInput{Title: title, Description: description, Helyszin: helyszin}, nil
+}
+
+// newEsemeny validates a proposal and builds its rows.
+func (a *App) newEsemeny(felhasznaloID, csoportID string, in EsemenyInput) (domain.Esemeny, []domain.Idopont, error) {
+	details, err := validDetails(EsemenyDetailsInput{Title: in.Title, Description: in.Description, Helyszin: in.Helyszin})
 	if err != nil {
 		return domain.Esemeny{}, nil, err
 	}
@@ -183,9 +203,9 @@ func (a *App) newEsemeny(felhasznaloID, csoportID string, in EsemenyInput) (doma
 	e := domain.Esemeny{
 		ID:          randomID(),
 		CsoportID:   csoportID,
-		Title:       title,
-		Description: description,
-		Helyszin:    helyszin,
+		Title:       details.Title,
+		Description: details.Description,
+		Helyszin:    details.Helyszin,
 		SzervezoID:  felhasznaloID,
 		Allapot:     domain.Egyeztetes,
 		CreatedAt:   now,
@@ -397,6 +417,10 @@ func idopontAllasok(e domain.Esemeny, idopontok []domain.Idopont, visszajelzesek
 		case domain.Nem:
 			allas.Nem++
 		}
+	}
+
+	for n := range out {
+		out[n].Removable = removeIdopontError(e, len(out), viewerID, out[n].Idopont, len(out[n].Visszajelzesek)) == nil
 	}
 
 	pontszamok := make([]Pontszam, len(out))
