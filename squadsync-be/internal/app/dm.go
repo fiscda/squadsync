@@ -89,6 +89,17 @@ func (a *App) sendDropOutDM(ctx context.Context, csoportID, szervezoID string, d
 	}
 }
 
+// sendSzervezoDM tells a Tag, on every Discord account, that they became the
+// Szervezo of an Esemeny of the Csoport.
+func (a *App) sendSzervezoDM(ctx context.Context, csoportID, felhasznaloID string, d gateway.SzervezoDM) {
+	for _, discordID := range a.dmAccounts(ctx, csoportID, felhasznaloID) {
+		cctx, cancel := context.WithTimeout(ctx, discordCallTimeout)
+		err := a.discord.SendSzervezoDM(cctx, discordID, d)
+		cancel()
+		a.logDiscordError("send szervezo dm", err, "felhasznalo", felhasznaloID, "discord_id", discordID)
+	}
+}
+
 // sendEmlekeztetoDM sends an Emlekezteto of an Esemeny of the Csoport to
 // every Discord account of the Felhasznalo.
 func (a *App) sendEmlekeztetoDM(ctx context.Context, csoportID, felhasznaloID string, e gateway.Emlekezteto) {

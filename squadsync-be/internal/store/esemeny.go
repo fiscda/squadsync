@@ -299,3 +299,75 @@ func parseNullTime(s sql.NullString) (*time.Time, error) {
 	}
 	return &t, nil
 }
+
+// UpdateEsemenySzervezo hands the Esemeny to another Szervezo. It returns
+// ErrNotFound if the Esemeny doesn't exist.
+func (q Queries) UpdateEsemenySzervezo(ctx context.Context, esemenyID, szervezoID string) error {
+	res, err := q.db.ExecContext(ctx, `UPDATE esemeny SET szervezo_id = ? WHERE id = ?`, szervezoID, esemenyID)
+	if err != nil {
+		return fmt.Errorf("update esemeny szervezo: %w", err)
+	}
+	return requireAffected(res, "update esemeny szervezo")
+}
+
+// ListActiveEsemenyekOfSzervezo returns the Esemenyek of the Csoport in
+// Egyeztetes or Veglegesitve that the Felhasznalo is the Szervezo of,
+// oldest first.
+func (q Queries) ListActiveEsemenyekOfSzervezo(ctx context.Context, csoportID, felhasznaloID string) ([]domain.Esemeny, error) {
+	rows, err := q.db.QueryContext(ctx,
+		`SELECT `+esemenyColumns+` FROM esemeny
+		 WHERE csoport_id = ? AND szervezo_id = ? AND allapot IN ('egyeztetes', 'veglegesitve')
+		 ORDER BY created_at, id`,
+		csoportID, felhasznaloID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list active esemenyek of szervezo: %w", err)
+	}
+	defer rows.Close()
+
+	var list []domain.Esemeny
+	for rows.Next() {
+		e, err := scanEsemeny(rows)
+		if err != nil {
+			return nil, fmt.Errorf("list active esemenyek of szervezo: %w", err)
+		}
+		list = append(list, e)
+	}
+	return list, rows.Err()
+}
+
+// ListVisszajelzoTags returns the current Tags of the Esemeny's Csoport who
+// gave a Visszajelzes on any of its Idopontok, ordered by name. A Vendeg
+// who isn't a Tag, a name-only Vendeg and someone who has left aren't Tags,
+// so they never appear.
+func (q Queries) ListVisszajelzoTags(ctx context.Context, esemenyID string) ([]domain.TagWithName, error) {
+	rows, err := q.db.QueryContext(ctx,
+		`SELECT t.csoport_id, t.felhasznalo_id, f.name, t.is_admin, t.created_at
+		 FROM esemeny e
+		 JOIN tag t ON t.csoport_id = e.csoport_id
+		 JOIN felhasznalo f ON f.id = t.felhasznalo_id
+		 WHERE e.id = ?
+		   AND EXISTS (SELECT 1 FROM visszajelzes v JOIN idopont i ON i.id = v.idopont_id
+		               WHERE i.esemeny_id = e.id AND v.felhasznalo_id = t.felhasznalo_id)
+		 ORDER BY f.name, t.felhasznalo_id`,
+		esemenyID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list visszajelzo tags: %w", err)
+	}
+	defer rows.Close()
+
+	var tags []domain.TagWithName
+	for rows.Next() {
+		var t domain.TagWithName
+		var createdAt string
+		if err := rows.Scan(&t.CsoportID, &t.FelhasznaloID, &t.FelhasznaloName, &t.Admin, &createdAt); err != nil {
+			return nil, fmt.Errorf("list visszajelzo tags: %w", err)
+		}
+		if t.CreatedAt, err = parseTime(createdAt); err != nil {
+			return nil, err
+		}
+		tags = append(tags, t)
+	}
+	return tags, rows.Err()
+}

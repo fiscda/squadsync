@@ -13,6 +13,7 @@ import {
   setCsoportMuted,
   setEmlekeztetok,
   setTagAdmin,
+  szervezoRefusal,
   unlinkCsatorna,
 } from "@/lib/backend";
 import { requireFelhasznalo } from "@/lib/felhasznalo";
@@ -205,21 +206,39 @@ export async function setAdminAction(
   return {};
 }
 
-/** Removes a Tag from the Csoport. Admins only. */
+/**
+ * Removes a Tag from the Csoport. Admins only. If the Tag is the Szervező of
+ * active Események, `szervezok` names the new Szervező of each (Esemény id to
+ * Felhasználó id); the removal and the handovers happen together or not at
+ * all.
+ */
 export async function removeTagAction(
   csoportId: string,
   targetId: string,
+  szervezok: Record<string, string> = {},
 ): Promise<CsoportActionState> {
   const felhasznalo = await requireFelhasznalo();
   try {
-    await removeTag(felhasznalo.id, csoportId, targetId);
+    await removeTag(felhasznalo.id, csoportId, targetId, szervezok);
   } catch (err) {
     unstable_rethrow(err);
     if (err instanceof BackendError) {
       if (err.status === 409 && err.code === "szervezo_of_active_esemeny") {
+        revalidatePath(`/csoportok/${csoportId}`);
+        return { error: "Minden érintett eseményhez válassz új szervezőt." };
+      }
+      if (err.status === 409 && err.code === "no_eligible_szervezo") {
+        const { esemeny } = szervezoRefusal(err);
+        revalidatePath(`/csoportok/${csoportId}`);
+        return {
+          error: `A(z) „${esemeny?.title ?? "ismeretlen"}” eseménynek nincs, akinek át lehetne adni a szervezést, ezért a tag nem távolítható el. Csak a szervezője mondhatja le az eseményt.`,
+        };
+      }
+      if (err.status === 409 && err.code === "not_eligible_szervezo") {
+        revalidatePath(`/csoportok/${csoportId}`);
         return {
           error:
-            "Ez a tag egy aktív esemény szervezője. Előbb adja át a szervezést, vagy mondja le az eseményt.",
+            "A kiválasztott tag nem lehet az esemény szervezője (közben megváltozott a helyzet). Válassz újra.",
         };
       }
       if (err.status === 409 && err.code === "last_admin") {
@@ -250,8 +269,11 @@ export async function leaveCsoportAction(
     unstable_rethrow(err);
     if (err instanceof BackendError) {
       if (err.status === 409 && err.code === "szervezo_of_active_esemeny") {
+        // The page is stale: the refreshed one lists what is in the way.
+        revalidatePath(`/csoportok/${csoportId}`);
         return {
-          error: "Előbb add át a szervezést vagy mondd le az eseményt",
+          error:
+            "Előbb add át a szervezést, vagy mondd le az eseményeket, aminek te vagy a szervezője.",
         };
       }
       if (err.status === 409 && err.code === "last_admin") {

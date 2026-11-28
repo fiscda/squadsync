@@ -322,7 +322,7 @@ func TestATagWhoLeavesOrIsRemovedLosesTheirClaims(t *testing.T) {
 			return h.App.LeaveCsoport(context.Background(), "bela", csoportID)
 		},
 		"removed by an Admin": func(h *apptest.Harness, csoportID string) error {
-			return h.App.RemoveTag(context.Background(), "anna", csoportID, "bela")
+			return h.App.RemoveTag(context.Background(), "anna", csoportID, "bela", nil)
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

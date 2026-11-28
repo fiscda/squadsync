@@ -39,6 +39,9 @@ type DiscordMessenger interface {
 	// SendDropOutDM tells one Discord account of the Szervezo that a
 	// Resztvevo dropped out.
 	SendDropOutDM(ctx context.Context, discordID string, d DropOut) error
+	// SendSzervezoDM tells one Discord account of a Tag that the Szervezo
+	// role of an Esemeny was handed to them.
+	SendSzervezoDM(ctx context.Context, discordID string, s SzervezoDM) error
 	// SendEmlekeztetoDM reminds one Discord account of a confirmed Esemeny
 	// that is coming up.
 	SendEmlekeztetoDM(ctx context.Context, discordID string, e Emlekezteto) error
@@ -76,6 +79,17 @@ type AutoDM struct {
 	// out ("kiesett").
 	Deleted bool
 	// Link is the Esemeny's web page.
+	Link string
+}
+
+// SzervezoDM tells a Tag that they are the Szervezo of an Esemeny now. Its
+// fields are plain text; the bot words and escapes them.
+type SzervezoDM struct {
+	CsoportName string
+	// Title is the Esemeny's title.
+	Title string
+	// Link is the Esemeny's web page. It may be a localhost URL, shown as
+	// text.
 	Link string
 }
 
@@ -307,6 +321,11 @@ func (Disabled) SendAnnouncementDM(context.Context, string, Announcement) error 
 
 // SendDropOutDM implements DiscordMessenger.
 func (Disabled) SendDropOutDM(context.Context, string, DropOut) error {
+	return ErrNotConfigured
+}
+
+// SendSzervezoDM implements DiscordMessenger.
+func (Disabled) SendSzervezoDM(context.Context, string, SzervezoDM) error {
 	return ErrNotConfigured
 }
 

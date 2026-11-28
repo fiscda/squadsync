@@ -37,7 +37,8 @@ var ErrLastAdmin = errors.New("the last admin can't give up the role or leave")
 
 // ErrSzervezoOfActiveEsemeny means the Tag is the Szervezo of an Esemeny in
 // Egyeztetes or Veglegesitve, so it can't leave the Csoport or be removed
-// from it. Handing the role over comes with #12.
+// from it, until they hand the role over (see szervezo.go). It comes as a
+// *SzervezoOfActiveEsemenyError naming the Esemenyek.
 var ErrSzervezoOfActiveEsemeny = errors.New("tag is the szervezo of an active esemeny")
 
 // CsoportDetail is a Csoport as one of its Tags sees it.
@@ -147,20 +148,32 @@ func (a *App) SetAdmin(ctx context.Context, felhasznaloID, csoportID, targetID s
 
 // RemoveTag removes a Tag from the Csoport. Only an Admin may: another Tag
 // gets ErrNotAdmin, anyone else ErrNotFound, as does a target who isn't a
-// Tag. A Szervezo of an active Esemeny gives ErrSzervezoOfActiveEsemeny.
-func (a *App) RemoveTag(ctx context.Context, felhasznaloID, csoportID, targetID string) error {
+// Tag.
+//
+// A target who is the Szervezo of active Esemenyek needs a new Szervezo for
+// each, named in szervezok (Esemeny id to the new Szervezo's Felhasznalo
+// id); see handOverAllOf for the errors. The handovers, the release of the
+// target's claims and the removal are one transaction: when any part is
+// refused, nothing changes. Without Esemenyek to hand over, szervezok may be
+// nil.
+func (a *App) RemoveTag(ctx context.Context, felhasznaloID, csoportID, targetID string, szervezok map[string]string) error {
 	var left tagLeft
+	var handovers []handover
 	err := a.store.InTx(ctx, func(q store.Queries) error {
 		if err := requireAdmin(ctx, q, csoportID, felhasznaloID); err != nil {
 			return err
 		}
 		var err error
+		if handovers, err = a.handOverAllOf(ctx, q, csoportID, targetID, szervezok); err != nil {
+			return err
+		}
 		left, err = a.deleteTag(ctx, q, csoportID, targetID)
 		return err
 	})
 	if err != nil {
 		return err
 	}
+	a.afterHandovers(handovers)
 	a.afterTagLeft(left)
 	return nil
 }
@@ -169,7 +182,8 @@ func (a *App) RemoveTag(ctx context.Context, felhasznaloID, csoportID, targetID 
 // gets ErrNotFound.
 //
 // The last Admin gets ErrLastAdmin unless they are the only Tag, and a
-// Szervezo of an active Esemeny gets ErrSzervezoOfActiveEsemeny. When the
+// Szervezo of an active Esemeny gets ErrSzervezoOfActiveEsemeny, until they
+// hand the role over (HandOverSzervezo) or cancel it. When the
 // last Tag leaves, the Csoport simply has no Tags; the next Felhasznalo to
 // join it becomes its Admin (see JoinCsoport). The leaver's Visszajelzesek
 // stay, but no longer count, and their claims in the Kiegeszitok are
@@ -244,12 +258,16 @@ func (a *App) deleteTag(ctx context.Context, q store.Queries, csoportID, targetI
 			}
 		}
 	}
-	szervezo, err := q.IsSzervezoOfActiveEsemeny(ctx, csoportID, targetID)
+	szervezoOf, err := q.ListActiveEsemenyekOfSzervezo(ctx, csoportID, targetID)
 	if err != nil {
 		return tagLeft{}, err
 	}
-	if szervezo {
-		return tagLeft{}, ErrSzervezoOfActiveEsemeny
+	if len(szervezoOf) > 0 {
+		blocking := make([]EsemenyRef, len(szervezoOf))
+		for n, e := range szervezoOf {
+			blocking[n] = refOf(e)
+		}
+		return tagLeft{}, &SzervezoOfActiveEsemenyError{Esemenyek: blocking}
 	}
 	esemenyek, err := q.ListEsemenyekOfCsoport(ctx, csoportID)
 	if err != nil {

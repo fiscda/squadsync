@@ -5,7 +5,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"squadsync-be/internal/apptest"
@@ -95,18 +94,20 @@ func TestRemoveTagAndLeaveRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InsertEsemeny: %v", err)
 	}
-	for _, rec := range []*httptest.ResponseRecorder{
-		call(t, api, http.MethodDelete, cecil, "", as("anna")),
-		call(t, api, http.MethodPost, "/csoport/"+id+"/kilepes", "", as("cecil")),
-	} {
-		expectStatus(t, rec, http.StatusConflict)
-		if e := decode[errorResp](t, rec); e.Code != "szervezo_of_active_esemeny" {
-			t.Fatalf("error = %+v, want code szervezo_of_active_esemeny", e)
-		}
+	rec := call(t, api, http.MethodPost, "/csoport/"+id+"/kilepes", "", as("cecil"))
+	expectStatus(t, rec, http.StatusConflict)
+	if e := decode[errorResp](t, rec); e.Code != "szervezo_of_active_esemeny" {
+		t.Fatalf("error = %+v, want code szervezo_of_active_esemeny", e)
+	}
+	// Nobody answered the Esemeny, so an Admin has nobody to hand it to.
+	rec = call(t, api, http.MethodDelete, cecil, "", as("anna"))
+	expectStatus(t, rec, http.StatusConflict)
+	if e := decode[errorResp](t, rec); e.Code != "no_eligible_szervezo" {
+		t.Fatalf("error = %+v, want code no_eligible_szervezo", e)
 	}
 
 	// The last Admin can't leave while others remain.
-	rec := call(t, api, http.MethodPost, "/csoport/"+id+"/kilepes", "", as("anna"))
+	rec = call(t, api, http.MethodPost, "/csoport/"+id+"/kilepes", "", as("anna"))
 	expectStatus(t, rec, http.StatusConflict)
 	if e := decode[errorResp](t, rec); e.Code != "last_admin" {
 		t.Fatalf("error = %+v, want code last_admin", e)

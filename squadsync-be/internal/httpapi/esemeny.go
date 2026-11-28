@@ -21,6 +21,7 @@ func (s *server) registerEsemeny(mux *http.ServeMux) {
 	mux.HandleFunc("POST /esemeny/{id}/veglegesites", withFelhasznalo(s.confirmIdopont))
 	mux.HandleFunc("POST /esemeny/{id}/ujranyitas", withFelhasznalo(s.reopenEgyeztetes))
 	mux.HandleFunc("POST /esemeny/{id}/lemondas", withFelhasznalo(s.cancelEsemeny))
+	mux.HandleFunc("POST /esemeny/{id}/szervezo-atadas", withFelhasznalo(s.handOverSzervezo))
 }
 
 // The wire forms below are kept in sync by hand with the types in
@@ -261,6 +262,21 @@ func (s *server) cancelEsemeny(w http.ResponseWriter, r *http.Request, felhaszna
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *server) handOverSzervezo(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
+	var body struct {
+		// FelhasznaloID is the new Szervezo.
+		FelhasznaloID string `json:"felhasznaloId"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	if err := s.app.HandOverSzervezo(r.Context(), felhasznaloID, r.PathValue("id"), body.FelhasznaloID); err != nil {
+		s.writeEsemenyError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *server) setVisszajelzes(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
 	var body struct {
 		Valasz string `json:"valasz"`
@@ -332,7 +348,7 @@ func (s *server) copyEsemeny(w http.ResponseWriter, r *http.Request, felhasznalo
 }
 
 func (s *server) writeEsemenyError(w http.ResponseWriter, r *http.Request, err error) {
-	if writeHataridoNotFuture(w, err) {
+	if writeHataridoNotFuture(w, err) || writeSzervezoError(w, err) {
 		return
 	}
 	for _, c := range []struct {
