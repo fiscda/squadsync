@@ -34,6 +34,8 @@ export const kiegeszitoRegistry: Record<
         "Kiadást csak véglegesített vagy lezajlott eseménynél lehet rögzíteni vagy módosítani.",
       koltsegek_locked:
         "Az elszámolás már elkészült, ezért a kiadások le vannak zárva.",
+      koltsegek_not_resztvevo:
+        "A fizető és a megosztás új tagjai csak a mostani résztvevők közül lehetnek.",
       koltsegek_split_sum:
         "Az egyedi összegeknek pontosan ki kell adniuk a kiadás teljes összegét.",
     },

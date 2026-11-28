@@ -21,10 +21,13 @@ import (
 // Who may do what:
 //   - Kiadasok are recorded, edited and deleted only while the Esemeny is
 //     Veglegesitve or Lezajlott (there are no Resztvevok in Egyeztetes, and
-//     an Elmaradt Esemeny has no Elszamolas), only by Resztvevok, and only
-//     while no Elszamolas has been calculated (kiadasokLocked).
+//     an Elmaradt Esemeny has no Elszamolas), and only while no Elszamolas
+//     has been calculated (kiadasokLocked): requireKiadasokOpen.
 //   - Any Resztvevo adds one, naming any Resztvevo as payer.
-//   - Its payer, its creator or the Szervezo edits or deletes it.
+//   - Its payer, its creator or the Szervezo edits or deletes it, even if
+//     they aren't a Resztvevo (any more): a payer who dropped out still
+//     fixes their own Kiadas. A new payer or a newly added split member
+//     must be a Resztvevo, though.
 //
 // The split is fixed when the Kiadas is created: Koltsegek has no claim
 // releaser, so drop-outs and re-confirmations never touch it, and its
@@ -57,6 +60,10 @@ var (
 	// ErrKiadasokLocked means an Elszamolas has been calculated, so the
 	// Kiadasok can't change (#22).
 	ErrKiadasokLocked = errors.New("the kiadasok are locked by the elszamolas")
+	// ErrKiadasNotResztvevo means a Kiadas write names someone who isn't a
+	// Resztvevo: the one adding it, a new payer or a new split member. It
+	// wraps ErrNotResztvevo.
+	ErrKiadasNotResztvevo = fmt.Errorf("%w: a kiadas names someone who isn't a resztvevo", ErrNotResztvevo)
 	// ErrKiadasSplitSum means the custom amounts of a split don't add up to
 	// the Kiadas's amount.
 	ErrKiadasSplitSum = errors.New("the custom amounts don't add up to the kiadas's amount")
@@ -69,6 +76,7 @@ type KiadasInput struct {
 	Amount int
 	// PayerID is the Felhasznalo who pays (or paid); "" means the caller.
 	PayerID string
+	// Description "" keeps the current one when editing (adding needs one).
 	// Allapot "" means Kifizetve when adding and keeps the current one when
 	// editing.
 	Allapot domain.KiadasAllapot
@@ -161,43 +169,45 @@ func kiadasokLocked(_ context.Context, _ store.Queries, _ string) (bool, error) 
 	return false, nil
 }
 
-// requireKiadasWrite is Koltsegek's guard (see the top of kiegeszito.go):
-// the Esemeny is Veglegesitve or Lezajlott (ErrKoltsegekClosed), no
-// Elszamolas locks the Kiadasok (ErrKiadasokLocked) and the actor is a
-// Resztvevo (ErrNotResztvevo). It returns the Resztvevok.
-func requireKiadasWrite(ctx context.Context, q store.Queries, e domain.Esemeny, actorID string) ([]domain.Resztvevo, error) {
+// requireKiadasokOpen is Koltsegek's guard (see the top of kiegeszito.go):
+// the Esemeny is Veglegesitve or Lezajlott (ErrKoltsegekClosed) and no
+// Elszamolas locks the Kiadasok (ErrKiadasokLocked). Who may write is
+// checked on top of it: a Resztvevo adds (AddKiadas), the payer, the
+// creator or the Szervezo edits and deletes (editableKiadas).
+func requireKiadasokOpen(ctx context.Context, q store.Queries, e domain.Esemeny) error {
 	if !hasResztvevok(e.Allapot) {
-		return nil, ErrKoltsegekClosed
+		return ErrKoltsegekClosed
 	}
 	locked, err := kiadasokLocked(ctx, q, e.ID)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if locked {
-		return nil, ErrKiadasokLocked
+		return ErrKiadasokLocked
 	}
-	vs, err := q.ListVisszajelzesekOfEsemeny(ctx, e.ID)
-	if err != nil {
-		return nil, err
-	}
-	resztvevok := resztvevokOf(e, vs)
-	if !holdsResztvevo(resztvevok, domain.ClaimHolder{FelhasznaloID: actorID}) {
-		return nil, ErrNotResztvevo
-	}
-	return resztvevok, nil
+	return nil
 }
 
-// canWriteKiadas is requireKiadasWrite as a yes or no, for views.
-func canWriteKiadas(ctx context.Context, q store.Queries, e domain.Esemeny, felhasznaloID string) (bool, error) {
-	_, err := requireKiadasWrite(ctx, q, e, felhasznaloID)
+// kiadasokOpen is requireKiadasokOpen as a yes or no, for views.
+func kiadasokOpen(ctx context.Context, q store.Queries, e domain.Esemeny) (bool, error) {
+	err := requireKiadasokOpen(ctx, q, e)
 	switch {
 	case err == nil:
 		return true, nil
-	case errors.Is(err, ErrKoltsegekClosed), errors.Is(err, ErrKiadasokLocked), errors.Is(err, ErrNotResztvevo):
+	case errors.Is(err, ErrKoltsegekClosed), errors.Is(err, ErrKiadasokLocked):
 		return false, nil
 	default:
 		return false, err
 	}
+}
+
+// koltsegekResztvevok returns the Esemeny's Resztvevok.
+func koltsegekResztvevok(ctx context.Context, q store.Queries, e domain.Esemeny) ([]domain.Resztvevo, error) {
+	vs, err := q.ListVisszajelzesekOfEsemeny(ctx, e.ID)
+	if err != nil {
+		return nil, err
+	}
+	return resztvevokOf(e, vs), nil
 }
 
 func holdsResztvevo(resztvevok []domain.Resztvevo, h domain.ClaimHolder) bool {
@@ -219,26 +229,45 @@ func mayEditKiadas(e domain.Esemeny, k domain.Kiadas, felhasznaloID string) bool
 // ErrNotFound; while it is switched off, ErrKiegeszitoOff. Any Tag can read
 // it, in every state.
 func (a *App) Koltsegek(ctx context.Context, felhasznaloID, esemenyID string) (Koltsegek, error) {
-	q := a.store.Queries
-	e, err := requireKiegeszitoOn(ctx, q, esemenyID, felhasznaloID, domain.Koltsegek)
-	if err != nil {
-		return Koltsegek{}, err
-	}
-	kiadasok, err := koltsegekAllas(ctx, q, e.ID)
-	if err != nil {
-		return Koltsegek{}, err
-	}
-	canWrite, err := canWriteKiadas(ctx, q, e, felhasznaloID)
-	if err != nil {
-		return Koltsegek{}, err
-	}
-	out := Koltsegek{Kiadasok: kiadasok, Egyenlegek: egyenlegekOf(kiadasok), CanAdd: canWrite}
-	for n := range out.Kiadasok {
-		k := &out.Kiadasok[n]
-		k.CanEdit = canWrite && mayEditKiadas(e, k.Kiadas, felhasznaloID)
-		if k.Allapot == domain.Tervezett {
-			out.Tervezett++
+	var out Koltsegek
+	// One transaction, so the Kiadasok and their shares are read together.
+	err := a.store.InTx(ctx, func(q store.Queries) error {
+		e, err := requireKiegeszitoOn(ctx, q, esemenyID, felhasznaloID, domain.Koltsegek)
+		if err != nil {
+			return err
 		}
+		kiadasok, err := koltsegekAllas(ctx, q, e.ID)
+		if err != nil {
+			return err
+		}
+		egyenlegek, err := egyenlegekOf(kiadasok)
+		if err != nil {
+			return err
+		}
+		open, err := kiadasokOpen(ctx, q, e)
+		if err != nil {
+			return err
+		}
+		resztvevok, err := koltsegekResztvevok(ctx, q, e)
+		if err != nil {
+			return err
+		}
+		out = Koltsegek{
+			Kiadasok:   kiadasok,
+			Egyenlegek: egyenlegek,
+			CanAdd:     open && holdsResztvevo(resztvevok, domain.ClaimHolder{FelhasznaloID: felhasznaloID}),
+		}
+		for n := range out.Kiadasok {
+			k := &out.Kiadasok[n]
+			k.CanEdit = open && mayEditKiadas(e, k.Kiadas, felhasznaloID)
+			if k.Allapot == domain.Tervezett {
+				out.Tervezett++
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return Koltsegek{}, err
 	}
 	return out, nil
 }
@@ -271,7 +300,7 @@ func koltsegekAllas(ctx context.Context, q store.Queries, esemenyID string) ([]K
 // what they paid, their share and the net (paid - share). Tervezett ones
 // don't count. It never returns nil; the Netto values add up to 0. The
 // Elszamolas (#22) turns these into transfers.
-func egyenlegekOf(kiadasok []KiadasAllas) []Egyenleg {
+func egyenlegekOf(kiadasok []KiadasAllas) ([]Egyenleg, error) {
 	byID := map[string]*Egyenleg{}
 	get := func(id, name string) *Egyenleg {
 		if b, ok := byID[id]; ok {
@@ -290,10 +319,13 @@ func egyenlegekOf(kiadasok []KiadasAllas) []Egyenleg {
 		}
 		get(k.PayerID, k.PayerName).Fizetett += k.Amount
 		for _, r := range k.Reszek {
-			// #13: a name-only Vendeg's share is charged to the Tag who
-			// added them: map r.Holder.VendegID to that Tag's Felhasznalo id
-			// (and name) here. Until then no share has a VendegID
-			// (resolveSplit refuses them).
+			if r.Holder.VendegID != "" {
+				// #13: a name-only Vendeg's share is charged to the Tag who
+				// added them: map r.Holder.VendegID to that Tag's
+				// Felhasznalo id (and name) here instead of refusing it.
+				// Until then resolveSplit never stores such a share.
+				return nil, fmt.Errorf("kiadas %s: a vendeg share can't be charged to their tag before #13", k.ID)
+			}
 			get(r.Holder.FelhasznaloID, r.Name).Resz += r.Amount
 		}
 	}
@@ -308,7 +340,7 @@ func egyenlegekOf(kiadasok []KiadasAllas) []Egyenleg {
 		}
 		return out[i].FelhasznaloID < out[j].FelhasznaloID
 	})
-	return out
+	return out, nil
 }
 
 // holderLess is the stable id order of holders: Felhasznalok by id, then
@@ -345,14 +377,15 @@ func egyenloReszek(amount int, holders []domain.ClaimHolder) []domain.KiadasResz
 // amount. previous is the Kiadas's current split (nil when adding), whose
 // holders may stay in it even if they aren't Resztvevok any more.
 func resolveSplit(in *SplitInput, amount int, resztvevok []domain.Resztvevo, previous []domain.KiadasResz, prevEgyenlo bool) ([]domain.KiadasResz, bool, error) {
-	if in == nil {
-		if previous == nil {
-			holders := make([]domain.ClaimHolder, 0, len(resztvevok))
-			for _, r := range resztvevok {
-				holders = append(holders, domain.HolderOf(r))
-			}
-			return egyenloReszek(amount, holders), true, nil
+	switch {
+	case in == nil && previous == nil:
+		// Every Resztvevo equally, checked like any other split (so a
+		// name-only Vendeg is refused until #13).
+		in = &SplitInput{}
+		for _, r := range resztvevok {
+			in.Holders = append(in.Holders, domain.HolderOf(r))
 		}
+	case in == nil:
 		in = &SplitInput{}
 		for _, r := range previous {
 			in.Holders = append(in.Holders, r.Holder)
@@ -389,7 +422,7 @@ func resolveSplit(in *SplitInput, amount int, resztvevok []domain.Resztvevo, pre
 			return nil, false, fmt.Errorf("%w: no such vendeg", ErrNotFound)
 		}
 		if !holdsResztvevo(resztvevok, h) {
-			return nil, false, fmt.Errorf("%w: the split names someone who isn't a resztvevo", ErrNotResztvevo)
+			return nil, false, ErrKiadasNotResztvevo
 		}
 	}
 	if in.Custom == nil {
@@ -412,9 +445,11 @@ func resolveSplit(in *SplitInput, amount int, resztvevok []domain.Resztvevo, pre
 	return reszek, false, nil
 }
 
-func validKiadas(in KiadasInput) (KiadasInput, error) {
+// validKiadas checks a KiadasInput; when editing, an empty description
+// means the current one.
+func validKiadas(in KiadasInput, editing bool) (KiadasInput, error) {
 	in.Description = strings.TrimSpace(in.Description)
-	if in.Description == "" {
+	if in.Description == "" && !editing {
 		return KiadasInput{}, fmt.Errorf("%w: a kiadas needs a description", ErrInvalidInput)
 	}
 	if utf8.RuneCountInString(in.Description) > MaxKiadasDescriptionLength {
@@ -430,12 +465,12 @@ func validKiadas(in KiadasInput) (KiadasInput, error) {
 }
 
 // AddKiadas records a Kiadas. Besides the errors of requireKiegeszitoOn and
-// requireKiadasWrite: a payer or a split member who isn't a Resztvevo gets
-// ErrNotResztvevo, custom amounts that don't add up ErrKiadasSplitSum and
+// requireKiadasokOpen: the caller, the payer or a split member not being a
+// Resztvevo gets ErrKiadasNotResztvevo, custom amounts that don't add up ErrKiadasSplitSum and
 // other bad input ErrInvalidInput. #21's fuel Kiadas comes through here
 // with the Auto's people as Split.Holders.
 func (a *App) AddKiadas(ctx context.Context, felhasznaloID, esemenyID string, in KiadasInput) (domain.Kiadas, error) {
-	in, err := validKiadas(in)
+	in, err := validKiadas(in, false)
 	if err != nil {
 		return domain.Kiadas{}, err
 	}
@@ -451,12 +486,16 @@ func (a *App) AddKiadas(ctx context.Context, felhasznaloID, esemenyID string, in
 		if err != nil {
 			return err
 		}
-		resztvevok, err := requireKiadasWrite(ctx, q, e, felhasznaloID)
+		if err := requireKiadasokOpen(ctx, q, e); err != nil {
+			return err
+		}
+		resztvevok, err := koltsegekResztvevok(ctx, q, e)
 		if err != nil {
 			return err
 		}
-		if !holdsResztvevo(resztvevok, domain.ClaimHolder{FelhasznaloID: in.PayerID}) {
-			return fmt.Errorf("%w: the payer isn't a resztvevo", ErrNotResztvevo)
+		if !holdsResztvevo(resztvevok, domain.ClaimHolder{FelhasznaloID: felhasznaloID}) ||
+			!holdsResztvevo(resztvevok, domain.ClaimHolder{FelhasznaloID: in.PayerID}) {
+			return ErrKiadasNotResztvevo
 		}
 		reszek, egyenlo, err := resolveSplit(in.Split, in.Amount, resztvevok, nil, false)
 		if err != nil {
@@ -495,7 +534,9 @@ func (a *App) AddKiadas(ctx context.Context, felhasznaloID, esemenyID string, in
 }
 
 // editableKiadas returns the Esemeny, the Kiadas, its split and the
-// Resztvevok if the Felhasznalo may edit or delete the Kiadas now.
+// Resztvevok if the Felhasznalo may edit or delete the Kiadas now: while
+// requireKiadasokOpen allows it, as its payer, its creator or the Szervezo
+// (ErrNotPermitted otherwise), Resztvevo or not.
 func editableKiadas(ctx context.Context, q store.Queries, esemenyID, kiadasID, felhasznaloID string) (domain.Esemeny, KiadasAllas, []domain.Resztvevo, error) {
 	e, err := requireKiegeszitoOn(ctx, q, esemenyID, felhasznaloID, domain.Koltsegek)
 	if err != nil {
@@ -508,7 +549,10 @@ func editableKiadas(ctx context.Context, q store.Queries, esemenyID, kiadasID, f
 	if k.EsemenyID != e.ID {
 		return domain.Esemeny{}, KiadasAllas{}, nil, ErrNotFound
 	}
-	resztvevok, err := requireKiadasWrite(ctx, q, e, felhasznaloID)
+	if err := requireKiadasokOpen(ctx, q, e); err != nil {
+		return domain.Esemeny{}, KiadasAllas{}, nil, err
+	}
+	resztvevok, err := koltsegekResztvevok(ctx, q, e)
 	if err != nil {
 		return domain.Esemeny{}, KiadasAllas{}, nil, err
 	}
@@ -530,11 +574,12 @@ func editableKiadas(ctx context.Context, q store.Queries, esemenyID, kiadasID, f
 // UpdateKiadas changes a Kiadas: its description, amount, payer, state
 // (tervezett and kifizetve both ways, such as marking it paid with the real
 // amount) and, with in.Split, its split. Its payer, its creator or the
-// Szervezo may (ErrNotPermitted otherwise). A new payer or a newly added
-// split member must be a Resztvevo; the current ones may stay. The other
+// Szervezo may, even if they aren't a Resztvevo (ErrNotPermitted for
+// anyone else). A new payer or a newly added split member must be a
+// Resztvevo (ErrKiadasNotResztvevo); the current ones may stay. The other
 // errors are those of AddKiadas.
 func (a *App) UpdateKiadas(ctx context.Context, felhasznaloID, esemenyID, kiadasID string, in KiadasInput) error {
-	in, err := validKiadas(in)
+	in, err := validKiadas(in, true)
 	if err != nil {
 		return err
 	}
@@ -547,7 +592,10 @@ func (a *App) UpdateKiadas(ctx context.Context, felhasznaloID, esemenyID, kiadas
 			in.PayerID = k.PayerID
 		}
 		if in.PayerID != k.PayerID && !holdsResztvevo(resztvevok, domain.ClaimHolder{FelhasznaloID: in.PayerID}) {
-			return fmt.Errorf("%w: the payer isn't a resztvevo", ErrNotResztvevo)
+			return ErrKiadasNotResztvevo
+		}
+		if in.Description == "" {
+			in.Description = k.Description
 		}
 		if in.Allapot == "" {
 			in.Allapot = k.Allapot
@@ -574,7 +622,7 @@ func (a *App) UpdateKiadas(ctx context.Context, felhasznaloID, esemenyID, kiadas
 // DeleteKiadas deletes a Kiadas with its split. A non-Tag, or a Kiadas of
 // another Esemeny, gets ErrNotFound; anyone but its payer, its creator and
 // the Szervezo ErrNotPermitted; plus the errors of requireKiegeszitoOn and
-// requireKiadasWrite.
+// requireKiadasokOpen.
 func (a *App) DeleteKiadas(ctx context.Context, felhasznaloID, esemenyID, kiadasID string) error {
 	err := a.store.InTx(ctx, func(q store.Queries) error {
 		_, k, _, err := editableKiadas(ctx, q, esemenyID, kiadasID, felhasznaloID)

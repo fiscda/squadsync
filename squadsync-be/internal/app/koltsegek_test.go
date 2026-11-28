@@ -236,8 +236,8 @@ func TestWhoMayAddEditAndDeleteKiadasok(t *testing.T) {
 	if kiadasAllas(t, koltsegek(t, h, "bela", d.ID), other.ID).CanEdit {
 		t.Fatalf("Bela sees CanEdit on Anna's Kiadas")
 	}
-	if err := h.App.DeleteKiadas(ctx, "dani", d.ID, k.ID); !errors.Is(err, app.ErrNotResztvevo) {
-		t.Fatalf("a non-Resztvevo deleting: err = %v, want ErrNotResztvevo", err)
+	if err := h.App.DeleteKiadas(ctx, "dani", d.ID, k.ID); !errors.Is(err, app.ErrNotPermitted) {
+		t.Fatalf("someone unrelated deleting: err = %v, want ErrNotPermitted", err)
 	}
 	if err := h.App.UpdateKiadas(ctx, "anna", d.ID, "nope", app.KiadasInput{Description: "x", Amount: 1}); !errors.Is(err, app.ErrNotFound) {
 		t.Fatalf("editing an unknown Kiadas: err = %v, want ErrNotFound", err)
@@ -496,5 +496,105 @@ func TestTheEsemenyMessageCountsKiadasok(t *testing.T) {
 	}
 	if got := lastSummary(); got != "🧾 1 Kiadás" {
 		t.Fatalf("summary = %q, want 🧾 1 Kiadás", got)
+	}
+}
+
+func TestThePayerCreatorAndSzervezoEditEvenIfNotResztvevok(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("a payer who dropped out", func(t *testing.T) {
+		h, d := tripWithKoltsegek(t)
+		k := addKiadas(t, h, "anna", d.ID, app.KiadasInput{Description: "Szállás", Amount: 900, PayerID: "cecil"})
+		answer(t, h, "cecil", d, 0, domain.Nem)
+		if !kiadasAllas(t, koltsegek(t, h, "cecil", d.ID), k.ID).CanEdit {
+			t.Fatalf("the payer who dropped out doesn't see CanEdit")
+		}
+		if koltsegek(t, h, "cecil", d.ID).CanAdd {
+			t.Fatalf("a drop-out sees CanAdd")
+		}
+		if err := h.App.UpdateKiadas(ctx, "cecil", d.ID, k.ID, app.KiadasInput{Description: "Szállás", Amount: 1200}); err != nil {
+			t.Fatalf("the payer who dropped out editing: %v", err)
+		}
+		if err := h.App.DeleteKiadas(ctx, "cecil", d.ID, k.ID); err != nil {
+			t.Fatalf("the payer who dropped out deleting: %v", err)
+		}
+		if _, err := h.App.AddKiadas(ctx, "cecil", d.ID, app.KiadasInput{Description: "x", Amount: 1}); !errors.Is(err, app.ErrKiadasNotResztvevo) {
+			t.Fatalf("a drop-out adding: err = %v, want ErrKiadasNotResztvevo", err)
+		}
+	})
+
+	t.Run("a creator who dropped out", func(t *testing.T) {
+		h, d := tripWithKoltsegek(t)
+		k := addKiadas(t, h, "bela", d.ID, app.KiadasInput{Description: "Bor", Amount: 900, PayerID: "anna"})
+		answer(t, h, "bela", d, 0, domain.Nem)
+		if err := h.App.UpdateKiadas(ctx, "bela", d.ID, k.ID, app.KiadasInput{Description: "Vörösbor", Amount: 900}); err != nil {
+			t.Fatalf("the creator who dropped out editing: %v", err)
+		}
+		if err := h.App.DeleteKiadas(ctx, "bela", d.ID, k.ID); err != nil {
+			t.Fatalf("the creator who dropped out deleting: %v", err)
+		}
+	})
+
+	t.Run("a Szervezo who said nem", func(t *testing.T) {
+		h, d := tripWithKoltsegek(t)
+		k := addKiadas(t, h, "bela", d.ID, app.KiadasInput{Description: "Bor", Amount: 900})
+		answer(t, h, "anna", d, 0, domain.Nem)
+		if err := h.App.UpdateKiadas(ctx, "anna", d.ID, k.ID, app.KiadasInput{Description: "Bor", Amount: 600}); err != nil {
+			t.Fatalf("the Szervezo who said nem editing: %v", err)
+		}
+		if got := reszek(kiadasAllas(t, koltsegek(t, h, "anna", d.ID), k.ID)); got != "anna=200 bela=200 cecil=200" {
+			t.Fatalf("split = %s", got)
+		}
+	})
+
+	t.Run("after a re-confirmation with no Resztvevok", func(t *testing.T) {
+		h, d := tripWithKoltsegek(t)
+		k := addKiadas(t, h, "bela", d.ID, app.KiadasInput{Description: "Bor", Amount: 900})
+		reopen(t, h, "anna", d.ID)
+		confirm(t, h, "anna", d, 1) // nobody said igen to it
+		if err := h.App.UpdateKiadas(ctx, "bela", d.ID, k.ID, app.KiadasInput{Description: "Bor", Amount: 1000}); err != nil {
+			t.Fatalf("the payer editing the amount: %v", err)
+		}
+		if got := reszek(kiadasAllas(t, koltsegek(t, h, "bela", d.ID), k.ID)); got != "anna=334 bela=333 cecil=333" {
+			t.Fatalf("split = %s", got)
+		}
+		if err := h.App.UpdateKiadas(ctx, "bela", d.ID, k.ID, app.KiadasInput{
+			Description: "Bor", Amount: 1000, Split: &app.SplitInput{Holders: holders("anna", "bela", "cecil", "dani")},
+		}); !errors.Is(err, app.ErrKiadasNotResztvevo) {
+			t.Fatalf("adding a non-Resztvevo to the split: err = %v, want ErrKiadasNotResztvevo", err)
+		}
+		if err := h.App.UpdateKiadas(ctx, "bela", d.ID, k.ID, app.KiadasInput{Description: "Bor", Amount: 1000, PayerID: "dani"}); !errors.Is(err, app.ErrKiadasNotResztvevo) {
+			t.Fatalf("a non-Resztvevo payer: err = %v, want ErrKiadasNotResztvevo", err)
+		}
+	})
+}
+
+func TestAnEmptyDescriptionKeepsTheCurrentOneOnEdit(t *testing.T) {
+	h, d := tripWithKoltsegek(t)
+	k := addKiadas(t, h, "bela", d.ID, app.KiadasInput{Description: "Szállás", Amount: 900, Allapot: domain.Tervezett})
+	if err := h.App.UpdateKiadas(context.Background(), "bela", d.ID, k.ID, app.KiadasInput{Amount: 1200, Allapot: domain.Kifizetve}); err != nil {
+		t.Fatalf("UpdateKiadas: %v", err)
+	}
+	got := kiadasAllas(t, koltsegek(t, h, "bela", d.ID), k.ID)
+	if got.Description != "Szállás" || got.Amount != 1200 || got.Allapot != domain.Kifizetve {
+		t.Fatalf("kiadas = %+v", got.Kiadas)
+	}
+	if _, err := h.App.AddKiadas(context.Background(), "bela", d.ID, app.KiadasInput{Amount: 1}); !errors.Is(err, app.ErrInvalidInput) {
+		t.Fatalf("adding without a description: err = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestBalancesRefuseAVendegShareUntilItsTagIsKnown(t *testing.T) {
+	h, d := tripWithKoltsegek(t)
+	k := addKiadas(t, h, "bela", d.ID, app.KiadasInput{Description: "Bor", Amount: 900})
+	// No use case stores a Vendeg share before #13; write one directly.
+	if err := h.Store.SetKiadasReszek(context.Background(), k.ID, []domain.KiadasResz{
+		{Holder: domain.ClaimHolder{FelhasznaloID: "bela"}, Amount: 450},
+		{Holder: domain.ClaimHolder{VendegID: "v1"}, Amount: 450},
+	}); err != nil {
+		t.Fatalf("SetKiadasReszek: %v", err)
+	}
+	if _, err := h.App.Koltsegek(context.Background(), "bela", d.ID); err == nil {
+		t.Fatalf("Koltsegek with a Vendeg share: want an error, not a balance under an empty id")
 	}
 }

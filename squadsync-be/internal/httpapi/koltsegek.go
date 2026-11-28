@@ -62,6 +62,7 @@ type koltsegekJSON struct {
 }
 
 type kiadasInputJSON struct {
+	// Description "" keeps the current one (editing only).
 	Description string `json:"description"`
 	Amount      int    `json:"amount"`
 	// PayerID "" means the caller (adding) or the current payer (editing).
@@ -179,6 +180,8 @@ func (s *server) writeKoltsegekError(w http.ResponseWriter, r *http.Request, err
 		writeCodedError(w, http.StatusConflict, err, "koltsegek_closed")
 	case errors.Is(err, app.ErrKiadasokLocked):
 		writeCodedError(w, http.StatusConflict, err, "koltsegek_locked")
+	case errors.Is(err, app.ErrKiadasNotResztvevo):
+		writeCodedError(w, http.StatusForbidden, err, "koltsegek_not_resztvevo")
 	case errors.Is(err, app.ErrKiadasSplitSum):
 		// 409 rather than 400, so the web shows its own notice.
 		writeCodedError(w, http.StatusConflict, err, "koltsegek_split_sum")

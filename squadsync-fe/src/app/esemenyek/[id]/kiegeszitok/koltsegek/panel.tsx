@@ -137,33 +137,38 @@ function KiadasItem({
 
       {kiadas.canEdit && tervezett ? (
         <form
-          action={markKifizetveAction.bind(
-            null,
-            esemenyId,
-            kiadas.id,
-            kiadas.description,
-          )}
+          action={markKifizetveAction.bind(null, esemenyId, kiadas.id)}
           className="flex flex-wrap items-center gap-2 text-sm"
         >
-          <input
-            name="amount"
-            type="number"
-            required
-            min={1}
-            max={100000000}
-            step={1}
-            defaultValue={kiadas.amount}
-            aria-label={`${kiadas.description}: a valódi összeg (Ft)`}
-            className={`${inputClass} w-32`}
-          />
-          <button type="submit" className={secondaryButtonClass}>
-            Kifizetve
-          </button>
-          {kiadas.egyenlo ? null : (
-            <span className="text-xs text-zinc-500">
-              Egyedi elosztásnál más összeghez a szerkesztésben add meg a
-              részeket.
-            </span>
+          {kiadas.egyenlo ? (
+            <>
+              <input
+                name="amount"
+                type="number"
+                required
+                min={1}
+                max={100000000}
+                step={1}
+                defaultValue={kiadas.amount}
+                aria-label={`${kiadas.description}: a valódi összeg (Ft)`}
+                className={`${inputClass} w-32`}
+              />
+              <button type="submit" className={secondaryButtonClass}>
+                Kifizetve
+              </button>
+            </>
+          ) : (
+            <>
+              {/* A custom split only adds up to its current amount. */}
+              <input type="hidden" name="amount" value={kiadas.amount} />
+              <button type="submit" className={secondaryButtonClass}>
+                Kifizetve ({formatFt(kiadas.amount)})
+              </button>
+              <span className="text-xs text-zinc-500">
+                Más összeghez nyisd meg a Szerkesztést, és add meg újra a
+                részeket.
+              </span>
+            </>
           )}
         </form>
       ) : null}

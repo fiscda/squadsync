@@ -77,8 +77,8 @@ func TestKoltsegekOverHTTP(t *testing.T) {
 	expectStatus(t, call(t, api, http.MethodPost, base+"/kiadas", `{"description":"x","amount":100}`, as("dani")), http.StatusNotFound)
 	rec = call(t, api, http.MethodPost, base+"/kiadas", `{"description":"x","amount":100,"payerId":"dani"}`, as("bela"))
 	expectStatus(t, rec, http.StatusForbidden)
-	if e := decode[errorResp](t, rec); e.Code != "not_resztvevo" {
-		t.Fatalf("code = %q, want not_resztvevo", e.Code)
+	if e := decode[errorResp](t, rec); e.Code != "koltsegek_not_resztvevo" {
+		t.Fatalf("code = %q, want koltsegek_not_resztvevo", e.Code)
 	}
 
 	k := decode[koltsegekResp](t, call(t, api, http.MethodGet, base, "", as("bela")))

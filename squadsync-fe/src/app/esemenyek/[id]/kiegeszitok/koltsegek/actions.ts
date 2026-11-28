@@ -57,17 +57,17 @@ export async function updateKiadasAction(
 }
 
 /**
- * Marks a planned Kiadás paid with its real amount, keeping everything else
- * (an equal split is recomputed; custom amounts must still add up).
+ * Marks a planned Kiadás paid with its real amount, keeping everything else:
+ * the description and payer ("" keeps them), and the split (an equal one is
+ * recomputed; a custom one sends its current amount, see panel.tsx).
  */
 export async function markKifizetveAction(
   esemenyId: string,
   kiadasId: string,
-  description: string,
   formData: FormData,
 ) {
   const input: KiadasInput = {
-    description: String(description),
+    description: "",
     amount: wholeNumber(formData.get("amount")),
     payerId: "",
     allapot: "kifizetve",

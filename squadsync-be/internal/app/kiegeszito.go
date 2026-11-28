@@ -80,9 +80,10 @@ import (
 //
 // Koltsegek doesn't fit requireSetupAllowed or requireClaimAllowed: a
 // Kiadas is recorded after the Esemeny took place too. Its writes need a
-// guard of its own: the Esemeny is Veglegesitve or Lezajlott, the actor is
-// a Resztvevo (isResztvevo works in both), and no Elszamolas has been
-// calculated yet. It registers vetoSwitchOff (not while it has Kiadasok)
+// guard of its own (requireKiadasokOpen): the Esemeny is Veglegesitve or
+// Lezajlott and no Elszamolas has been calculated yet. On top of it, a
+// Resztvevo adds a Kiadas, while its payer, its creator or the Szervezo
+// edits or deletes it, Resztvevo or not. It registers vetoSwitchOff (not while it has Kiadasok)
 // and no releaseClaims (Kiadasok are never touched automatically). Its
 // switchable also allows Lezajlott, so a Szervezo who forgot can switch it
 // on after the trip. See app/koltsegek.go (requireKiadasWrite, and the

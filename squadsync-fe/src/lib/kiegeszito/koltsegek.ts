@@ -61,6 +61,7 @@ export type Koltsegek = {
 };
 
 export type KiadasInput = {
+  /** "" keeps the current one (editing only). */
   description: string;
   amount: number;
   /** "" means the caller (adding) or the current payer (editing). */
