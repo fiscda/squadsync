@@ -6,11 +6,7 @@ import (
 )
 
 type kiegeszitokResp struct {
-	Kiegeszitok []struct {
-		Kind       string `json:"kind"`
-		Enabled    bool   `json:"enabled"`
-		Switchable bool   `json:"switchable"`
-	} `json:"kiegeszitok"`
+	Kiegeszitok []kiegeszitoResp `json:"kiegeszitok"`
 }
 
 type felszerelesResp struct {
@@ -35,20 +31,22 @@ type felszerelesResp struct {
 	CanClaim    bool     `json:"canClaim"`
 }
 
-// felszerelesKiegeszito is Felszereles among an Esemeny's Kiegeszitok.
-func felszerelesKiegeszito(t *testing.T, r kiegeszitokResp) struct {
+type kiegeszitoResp = struct {
 	Kind       string `json:"kind"`
 	Enabled    bool   `json:"enabled"`
 	Switchable bool   `json:"switchable"`
-} {
+}
+
+// kiegeszitoOf picks one Kiegeszito out of an Esemeny's list.
+func kiegeszitoOf(t *testing.T, d kiegeszitokResp, kind string) kiegeszitoResp {
 	t.Helper()
-	for _, k := range r.Kiegeszitok {
-		if k.Kind == "felszereles" {
+	for _, k := range d.Kiegeszitok {
+		if k.Kind == kind {
 			return k
 		}
 	}
-	t.Fatalf("kiegeszitok = %+v, want Felszereles among them", r.Kiegeszitok)
-	panic("unreachable")
+	t.Fatalf("kiegeszito %s not in %+v", kind, d.Kiegeszitok)
+	return kiegeszitoResp{}
 }
 
 func TestSwitchingKiegeszitokOverHTTP(t *testing.T) {
@@ -56,7 +54,7 @@ func TestSwitchingKiegeszitokOverHTTP(t *testing.T) {
 	path := "/esemeny/" + esemenyID + "/kiegeszito/felszereles"
 
 	d := decode[kiegeszitokResp](t, call(t, api, http.MethodGet, "/esemeny/"+esemenyID, "", as("bela")))
-	if f := felszerelesKiegeszito(t, d); f.Enabled || !f.Switchable {
+	if f := kiegeszitoOf(t, d, "felszereles"); f.Enabled || !f.Switchable {
 		t.Fatalf("kiegeszitok = %+v, want Felszereles off and switchable", d.Kiegeszitok)
 	}
 	expectStatus(t, call(t, api, http.MethodGet, "/esemeny/"+esemenyID+"/felszereles", "", as("bela")), http.StatusConflict)
@@ -68,7 +66,7 @@ func TestSwitchingKiegeszitokOverHTTP(t *testing.T) {
 	expectStatus(t, call(t, api, http.MethodPut, path, `{"enabled":true}`, as("anna")), http.StatusNoContent)
 
 	d = decode[kiegeszitokResp](t, call(t, api, http.MethodGet, "/esemeny/"+esemenyID, "", as("bela")))
-	if !felszerelesKiegeszito(t, d).Enabled {
+	if !kiegeszitoOf(t, d, "felszereles").Enabled {
 		t.Fatalf("kiegeszitok = %+v, want Felszereles on", d.Kiegeszitok)
 	}
 
