@@ -46,6 +46,23 @@ type DiscordMessenger interface {
 	// voting Hatarido of an Esemeny passed, with how its Idopontok stand
 	// and, if they fit, a confirm button for each.
 	SendHataridoDM(ctx context.Context, discordID string, h HataridoDM) error
+	// SendAutoDM tells one Discord account of a passenger that their Auto
+	// is gone.
+	SendAutoDM(ctx context.Context, discordID string, d AutoDM) error
+}
+
+// AutoDM tells a passenger that their Auto is gone, so they look for
+// another seat. Its fields are plain text; the bot words and escapes them.
+type AutoDM struct {
+	// SoforName is the Sofor whose Auto it was.
+	SoforName string
+	// Title is the Esemeny's title.
+	Title string
+	// Deleted is set when the Auto was deleted, not when its Sofor dropped
+	// out ("kiesett").
+	Deleted bool
+	// Link is the Esemeny's web page.
+	Link string
 }
 
 // Emlekezteto reminds a Resztvevo of the confirmed Idopont of an Esemeny.
@@ -286,6 +303,11 @@ func (Disabled) SendEmlekeztetoDM(context.Context, string, Emlekezteto) error {
 
 // SendHataridoDM implements DiscordMessenger.
 func (Disabled) SendHataridoDM(context.Context, string, HataridoDM) error {
+	return ErrNotConfigured
+}
+
+// SendAutoDM implements DiscordMessenger.
+func (Disabled) SendAutoDM(context.Context, string, AutoDM) error {
 	return ErrNotConfigured
 }
 
