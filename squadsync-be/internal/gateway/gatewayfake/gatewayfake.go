@@ -32,6 +32,8 @@ type DM struct {
 	Hatarido *gateway.HataridoDM
 	// Auto is set for a passenger's DM that their Auto is gone.
 	Auto *gateway.AutoDM
+	// Szallas is set for a sleeper's DM that their Szoba is gone.
+	Szallas *gateway.SzallasDM
 }
 
 // AnnouncementPost is one announcement posted in a channel.
@@ -202,6 +204,17 @@ func (d *Discord) SendAutoDM(_ context.Context, discordID string, a gateway.Auto
 		return d.fail
 	}
 	d.dms = append(d.dms, DM{DiscordID: discordID, Auto: &a})
+	return nil
+}
+
+// SendSzallasDM records the message.
+func (d *Discord) SendSzallasDM(_ context.Context, discordID string, z gateway.SzallasDM) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.fail != nil {
+		return d.fail
+	}
+	d.dms = append(d.dms, DM{DiscordID: discordID, Szallas: &z})
 	return nil
 }
 
