@@ -62,8 +62,9 @@ import (
 // Either party of an Utalas, or the Szervezo, marks it megvolt
 // (SetUtalasMegvolt), and may take that back until every Utalas is
 // megvolt: then the Esemeny is "Elszamolva ✓" (on the web and in the
-// summary line), which is final. With no Utalas at all (everyone square),
-// it is Elszamolva at once.
+// summary line), and the megvolt marks can't be taken back any more. With
+// no Utalas at all (everyone square), it is Elszamolva at once, and since
+// nothing is megvolt the Szervezo can still reopen it.
 //
 // The Szervezo can reopen it (ReopenElszamolas) only while no Utalas is
 // megvolt: the Utalasok are deleted, the Kiadasok unlock, and every
@@ -109,8 +110,8 @@ var (
 	// ErrElszamolasMegvolt means the Elszamolas can't be reopened because
 	// an Utalas is already marked megvolt.
 	ErrElszamolasMegvolt = errors.New("the elszamolas can't be reopened once an utalas is megvolt")
-	// ErrElszamolva means every Utalas is megvolt, which is final: none
-	// can be taken back.
+	// ErrElszamolva means every Utalas is megvolt, so no megvolt mark can
+	// be taken back.
 	ErrElszamolva = errors.New("every utalas is megvolt: the esemeny is elszamolva")
 )
 
@@ -402,8 +403,9 @@ func (a *App) ConfirmKiadasokRecorded(ctx context.Context, felhasznaloID, esemen
 
 // UnconfirmKiadasokRecorded takes the Felhasznalo's confirmation back
 // ("Mégsem"), until the Elszamolas is calculated (ErrElszamolasKiszamolva).
-// Its other errors are those of ConfirmKiadasokRecorded; taking back a
-// confirmation that isn't there changes nothing.
+// Anyone but a Resztvevo gets ErrElszamolasNotResztvevo; the other errors
+// are those of ConfirmKiadasokRecorded. Taking back a confirmation that
+// isn't there changes nothing.
 func (a *App) UnconfirmKiadasokRecorded(ctx context.Context, felhasznaloID, esemenyID string) error {
 	err := a.store.InTx(ctx, func(q store.Queries) error {
 		e, err := requireKiegeszitoOn(ctx, q, esemenyID, felhasznaloID, domain.Koltsegek)
@@ -416,6 +418,9 @@ func (a *App) UnconfirmKiadasokRecorded(ctx context.Context, felhasznaloID, esem
 		}
 		if err := s.requireOpen(); err != nil {
 			return err
+		}
+		if !holdsResztvevo(s.resztvevok, domain.ClaimHolder{FelhasznaloID: felhasznaloID}) {
+			return ErrElszamolasNotResztvevo
 		}
 		// #13: also take back the confirmations of their name-only Vendegs.
 		return q.DeleteElszamolasMegerosites(ctx, e.ID, domain.ClaimHolder{FelhasznaloID: felhasznaloID})

@@ -220,6 +220,9 @@ func TestAConfirmationCanBeTakenBackUntilTheCalculation(t *testing.T) {
 	if e := elszamolasOf(t, h, "bela", d.ID); e.Allapot != app.ElszamolasMegerosites {
 		t.Fatalf("allapot = %s, want megerosites", e.Allapot)
 	}
+	if err := h.App.UnconfirmKiadasokRecorded(ctx, "dani", d.ID); !errors.Is(err, app.ErrElszamolasNotResztvevo) {
+		t.Fatalf("Dani (nem) taking a confirmation back: err = %v, want ErrElszamolasNotResztvevo", err)
+	}
 	confirmKiadasok(t, h, d.ID, "bela")
 	if err := h.App.UnconfirmKiadasokRecorded(ctx, "bela", d.ID); !errors.Is(err, app.ErrElszamolasKiszamolva) {
 		t.Fatalf("Mégsem after the calculation: err = %v, want ErrElszamolasKiszamolva", err)
@@ -666,4 +669,111 @@ func TestNoReminderOnceCalculatedOrWithoutKiadasok(t *testing.T) {
 		runAt(t, h, firstEnd.Add(72*time.Hour))
 		expectLines(t, "reminders", elszamolasEmlekeztetok(h), "discord-anna", "discord-bela")
 	})
+}
+
+func TestEditingAKiadasTakesBackTheConfirmationOfATervezettPayer(t *testing.T) {
+	ctx := context.Background()
+	// Anna and Bela have confirmed; Cecil hasn't, so nothing is calculated.
+	setup := func(t *testing.T) (*apptest.Harness, app.EsemenyDetail) {
+		t.Helper()
+		h, d := lezajlottTrip(t)
+		addKiadas(t, h, "anna", d.ID, app.KiadasInput{Description: "Bor", Amount: 900})
+		confirmKiadasok(t, h, d.ID, "anna", "bela")
+		return h, d
+	}
+	expectConfirmed := func(t *testing.T, h *apptest.Harness, d app.EsemenyDetail, want string) {
+		t.Helper()
+		if got := names(elszamolasOf(t, h, "anna", d.ID).Megerositettek); got != want {
+			t.Fatalf("confirmed = %q, want %q", got, want)
+		}
+	}
+
+	t.Run("changing the payer to a confirmed person", func(t *testing.T) {
+		h, d := setup(t)
+		// Bela records a planned one Cecil pays, then makes himself the payer.
+		k := addKiadas(t, h, "bela", d.ID, app.KiadasInput{Description: "Szállás", Amount: 60000, PayerID: "cecil", Allapot: domain.Tervezett})
+		expectConfirmed(t, h, d, "Anna bela")
+		if err := h.App.UpdateKiadas(ctx, "bela", d.ID, k.ID, app.KiadasInput{Amount: 60000, PayerID: "bela"}); err != nil {
+			t.Fatalf("UpdateKiadas: %v", err)
+		}
+		expectConfirmed(t, h, d, "Anna")
+	})
+
+	t.Run("flipping kifizetve to tervezett", func(t *testing.T) {
+		h, d := setup(t)
+		k := addKiadas(t, h, "bela", d.ID, app.KiadasInput{Description: "Benzin", Amount: 6000})
+		expectConfirmed(t, h, d, "Anna bela")
+		if err := h.App.UpdateKiadas(ctx, "bela", d.ID, k.ID, app.KiadasInput{Amount: 6000}); err != nil {
+			t.Fatalf("UpdateKiadas: %v", err)
+		}
+		expectConfirmed(t, h, d, "Anna bela") // still kifizetve: nothing changes
+		if err := h.App.UpdateKiadas(ctx, "bela", d.ID, k.ID, app.KiadasInput{Amount: 6000, Allapot: domain.Tervezett}); err != nil {
+			t.Fatalf("UpdateKiadas: %v", err)
+		}
+		expectConfirmed(t, h, d, "Anna")
+		if err := h.App.ConfirmKiadasokRecorded(ctx, "bela", d.ID); !errors.Is(err, app.ErrElszamolasTervezett) {
+			t.Fatalf("Bela confirming again: err = %v, want ErrElszamolasTervezett", err)
+		}
+	})
+
+	t.Run("someone else making a confirmed person the payer", func(t *testing.T) {
+		h, d := setup(t)
+		k := addKiadas(t, h, "cecil", d.ID, app.KiadasInput{Description: "Hajó", Amount: 20000, Allapot: domain.Tervezett})
+		if err := h.App.UpdateKiadas(ctx, "cecil", d.ID, k.ID, app.KiadasInput{Amount: 20000, PayerID: "anna"}); err != nil {
+			t.Fatalf("UpdateKiadas: %v", err)
+		}
+		expectConfirmed(t, h, d, "bela")
+	})
+}
+
+func TestConcurrentLastConfirmationsAndClosingCalculateOnce(t *testing.T) {
+	for round := range 5 {
+		t.Run(fmt.Sprint(round), func(t *testing.T) {
+			h, d := lezajlottTrip(t)
+			ctx := context.Background()
+			addKiadas(t, h, "anna", d.ID, app.KiadasInput{Description: "Bor", Amount: 900})
+			confirmKiadasok(t, h, d.ID, "anna")
+
+			calls := []func() error{
+				func() error { return h.App.ConfirmKiadasokRecorded(ctx, "bela", d.ID) },
+				func() error { return h.App.ConfirmKiadasokRecorded(ctx, "cecil", d.ID) },
+				func() error { return h.App.CloseElszamolas(ctx, "anna", d.ID) },
+			}
+			errs := make([]error, len(calls))
+			var wg sync.WaitGroup
+			for n, call := range calls {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					errs[n] = call()
+				}()
+			}
+			wg.Wait()
+
+			// Closing first refuses both confirmations; otherwise the second
+			// confirmation or the close calculates, and what comes after is
+			// refused.
+			refused := 0
+			for n, err := range errs {
+				switch {
+				case errors.Is(err, app.ErrElszamolasKiszamolva):
+					refused++
+				case err != nil:
+					t.Fatalf("call %d: %v", n, err)
+				}
+			}
+			if refused < 1 || refused > 2 {
+				t.Fatalf("refused = %d (errs %v), want 1 or 2", refused, errs)
+			}
+			k := koltsegek(t, h, "anna", d.ID)
+			if k.Elszamolas.Allapot != app.ElszamolasKiszamolva || utalasok(k.Elszamolas) != "bela>anna:300 cecil>anna:300" {
+				t.Fatalf("elszamolas = %+v (utalasok %s)", k.Elszamolas, utalasok(k.Elszamolas))
+			}
+			for _, f := range []string{"anna", "bela", "cecil"} {
+				if n := len(elszamolasDMs(h, "discord-"+f)); n != 1 {
+					t.Fatalf("%s got %d result DMs, want 1", f, n)
+				}
+			}
+		})
+	}
 }
