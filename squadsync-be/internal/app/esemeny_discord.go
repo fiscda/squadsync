@@ -87,7 +87,11 @@ func (a *App) esemenyMessage(ctx context.Context, q store.Queries, e domain.Esem
 		m.Idopontok[n] = line
 	}
 	for _, r := range d.Resztvevok {
-		m.Resztvevok = append(m.Resztvevok, r.Name)
+		name := r.Name
+		if r.IsVendeg {
+			name += " (vendég)"
+		}
+		m.Resztvevok = append(m.Resztvevok, name)
 	}
 	linkable := discordLinkable(pageURL)
 	if linkable {

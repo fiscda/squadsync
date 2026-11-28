@@ -5,7 +5,7 @@ import "squadsync-be/internal/domain"
 // Resztvevok are the people with igen on the confirmed Idopont. This file
 // is the one place that decides who they are; every rule that depends on
 // them (the drop-out DM here, claims in Kiegeszitok in #16, the headcount
-// with Vendegs in #13, calendar events in #24) goes through it.
+// with Vendegek, calendar events in #24) goes through it.
 
 // hasResztvevok tells whether an Esemeny in this state has Resztvevok: only
 // once an Idopont is confirmed. Lezajlott keeps them, because the
@@ -35,11 +35,11 @@ func makesResztvevo(e domain.Esemeny, i domain.Idopont, valasz domain.Valasz) bo
 	return ok && i.ID == confirmed && valasz == domain.Igen
 }
 
-// countsAsResztvevo tells whether the giver of a Visszajelzes can be a
-// Resztvevo at all: a Tag of the Esemeny's Csoport, not someone who has
-// left it. #13 adds Vendegs here (Felhasznalok and name-only ones).
+// countsAsResztvevo tells whether whoever a Visszajelzes is for can be a
+// Resztvevo at all: a Tag of the Esemeny's Csoport (not someone who has
+// left it) or a Vendeg of the Esemeny, a Felhasznalo or a name-only one.
 func countsAsResztvevo(v domain.VisszajelzesOfEsemeny) bool {
-	return v.IsTag
+	return v.IsTag || v.IsVendeg
 }
 
 // resztvevokOf picks the Resztvevok out of the Esemeny's Visszajelzesek
@@ -58,8 +58,11 @@ func resztvevokOf(e domain.Esemeny, visszajelzesek []domain.VisszajelzesOfEsemen
 		}
 		out = append(out, domain.Resztvevo{
 			FelhasznaloID: v.FelhasznaloID,
+			VendegID:      v.VendegID,
 			Name:          v.FelhasznaloName,
 			IsTag:         v.IsTag,
+			IsVendeg:      !v.IsTag,
+			AddedBy:       v.VendegAddedBy,
 		})
 	}
 	return out

@@ -253,12 +253,12 @@ func TestOneSeatPerPersonSoMovingMeansLeavingFirst(t *testing.T) {
 			t.Fatalf("ReleaseUles: %v", err)
 		}
 	}
-	// A seat in an unknown Auto, and one for a Vendeg before #13.
+	// A seat in an unknown Auto, and one for an unknown Vendeg.
 	if err := h.App.ClaimUles(ctx, "cecil", d.ID, "no-such-auto", app.UtasInput{}); !errors.Is(err, app.ErrNotFound) {
 		t.Fatalf("an unknown Auto: err = %v, want ErrNotFound", err)
 	}
 	if err := h.App.ClaimUles(ctx, "cecil", d.ID, belas.ID, app.UtasInput{VendegID: "v1"}); !errors.Is(err, app.ErrNotFound) {
-		t.Fatalf("a Vendeg before #13: err = %v, want ErrNotFound", err)
+		t.Fatalf("an unknown Vendeg: err = %v, want ErrNotFound", err)
 	}
 	// Only Resztvevok claim.
 	if err := h.App.ClaimUles(ctx, "emil", d.ID, belas.ID, app.UtasInput{}); !errors.Is(err, app.ErrNotResztvevo) {

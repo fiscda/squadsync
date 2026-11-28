@@ -20,7 +20,7 @@ export type Auto = {
 /** Someone in an Autó, saját úton, or without a seat. */
 export type Szemely = {
   felhasznaloId: string;
-  /** A name-only Vendég's id (#13), "" otherwise. */
+  /** A name-only Vendég's id, "" or absent otherwise. */
   vendegId?: string;
   name: string;
 };
@@ -160,32 +160,36 @@ export async function deleteAuto(
   await callBackend<void>(felhasznaloId, "DELETE", autoPath(esemenyId, autoId));
 }
 
-/** The caller claims a seat in the Autó. */
+/** The caller claims a seat in the Autó, or one for their name-only Vendég. */
 export async function claimUles(
   felhasznaloId: string,
   esemenyId: string,
   autoId: string,
+  vendegId = "",
 ): Promise<void> {
   await callBackend<void>(
     felhasznaloId,
     "POST",
     `${autoPath(esemenyId, autoId)}/ules`,
-    {},
+    { vendegId },
   );
 }
 
 /**
- * Takes a seat away: the caller's, or (the Szervező only) another
- * Felhasználó's.
+ * Takes a seat away: the caller's, their name-only Vendég's (vendegId), or
+ * (the Szervező only) another Felhasználó's.
  */
 export async function releaseUles(
   felhasznaloId: string,
   esemenyId: string,
   targetId?: string,
+  vendegId = "",
 ): Promise<void> {
-  const query = targetId
-    ? `?felhasznaloId=${encodeURIComponent(targetId)}`
-    : "";
+  const query = vendegId
+    ? `?vendegId=${encodeURIComponent(vendegId)}`
+    : targetId
+      ? `?felhasznaloId=${encodeURIComponent(targetId)}`
+      : "";
   await callBackend<void>(
     felhasznaloId,
     "DELETE",
@@ -208,15 +212,17 @@ export async function moveUtas(
   );
 }
 
+/** Marks the caller (or their name-only Vendég) saját úton, or unmarks them. */
 export async function setSajatUton(
   felhasznaloId: string,
   esemenyId: string,
   on: boolean,
+  vendegId = "",
 ): Promise<void> {
   await callBackend<void>(
     felhasznaloId,
     "PUT",
     `${base(esemenyId)}/sajat-uton`,
-    { on },
+    { on, vendegId },
   );
 }

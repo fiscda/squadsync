@@ -40,7 +40,8 @@ import (
 //     DELETE CASCADE, and every Felhasznalo id column declares REFERENCES
 //     felhasznalo (id). A claim table copies tetel_vallalas
 //     (202611281601_felszereles.sql): felhasznalo_id REFERENCES
-//     felhasznalo (id), vendeg_id TEXT with no REFERENCES yet (#13 adds it),
+//     felhasznalo (id), vendeg_id TEXT REFERENCES vendeg (id) ON DELETE
+//     CASCADE,
 //     CHECK ((felhasznalo_id IS NULL) <> (vendeg_id IS NULL)) and a
 //     partial unique index on each. The kind enum and its CHECK already
 //     list all six kinds.
@@ -56,7 +57,8 @@ import (
 //     	})
 //     }
 //
-//     Each use case starts with requireKiegeszitoOn, then calls
+//     Each use case starts with requireKiegeszitoOn (which lets Vendegek
+//     in: they see and claim like Tags once Resztvevok), then calls
 //     requireSetupAllowed for setup, or requireClaimAllowed (claiming for
 //     oneself) or requireClaimAllowedBy(..., true) (the Szervezo moving
 //     people, #17 and #18) for claims, and ends every write with
@@ -339,10 +341,12 @@ func (a *App) kiegeszitoChanged(esemenyID string, after ...kiegeszitoJob) {
 }
 
 // requireKiegeszitoOn returns the Esemeny if the Felhasznalo is a Tag of
-// its Csoport (ErrNotFound otherwise) and the Kiegeszito is on
-// (ErrKiegeszitoOff otherwise). Every use case of a Kiegeszito starts here.
+// its Csoport or a Vendeg of it (ErrNotFound otherwise) and the Kiegeszito
+// is on (ErrKiegeszitoOff otherwise). Every use case of a Kiegeszito starts
+// here. A Vendeg is never the Szervezo, so the Szervezo's setup stays
+// Tag-only; anything else a Kiegeszito keeps for Tags it checks itself.
 func requireKiegeszitoOn(ctx context.Context, q store.Queries, esemenyID, felhasznaloID string, kind domain.KiegeszitoKind) (domain.Esemeny, error) {
-	e, err := requireEsemenyTag(ctx, q, esemenyID, felhasznaloID)
+	e, _, err := requireEsemenyMember(ctx, q, esemenyID, felhasznaloID)
 	if err != nil {
 		return domain.Esemeny{}, err
 	}
@@ -384,22 +388,23 @@ func requireClaimAllowed(ctx context.Context, q store.Queries, e domain.Esemeny,
 //
 //   - only while the Esemeny is Veglegesitve (ErrClaimingClosed), so claims
 //     are frozen while it is back in Egyeztetes;
-//   - for themselves; or, with allowSzervezo, for anyone when the actor is
-//     the Szervezo (moving people between Autok or Agyak, #17 and #18);
-//     anyone else gets ErrNotPermitted;
-//   - for a name-only Vendeg (#13), whose Tag claims for them; #13 checks
-//     the Vendeg and their Tag here, and until then a Vendeg is
-//     ErrNotFound;
+//   - for themselves (a Tag, or a Vendeg who is a Felhasznalo); or, with
+//     allowSzervezo, for anyone when the actor is the Szervezo (moving
+//     people between Autok or Agyak, #17 and #18); anyone else gets
+//     ErrNotPermitted;
+//   - for a name-only Vendeg of the Esemeny (ErrNotFound for any other
+//     id), by the Tag who added them (or the Szervezo with allowSzervezo);
 //   - only if the holder is a Resztvevo (ErrNotResztvevo), whoever acts.
 func requireClaimAllowedBy(ctx context.Context, q store.Queries, e domain.Esemeny, actorID string, holder domain.ClaimHolder, allowSzervezo bool) error {
 	if e.Allapot != domain.Veglegesitve {
 		return ErrClaimingClosed
 	}
-	if holder.VendegID != "" {
-		return fmt.Errorf("%w: no such vendeg", ErrNotFound)
-	}
 	bySzervezo := allowSzervezo && actorID == e.SzervezoID
-	if holder.FelhasznaloID != actorID && !bySzervezo {
+	if holder.VendegID != "" {
+		if err := requireVendegClaim(ctx, q, e, actorID, holder.VendegID, bySzervezo); err != nil {
+			return err
+		}
+	} else if holder.FelhasznaloID != actorID && !bySzervezo {
 		return ErrNotPermitted
 	}
 	ok, err := isResztvevo(ctx, q, e, holder)
@@ -466,8 +471,9 @@ func (a *App) releaseClaims(ctx context.Context, q store.Queries, e domain.Eseme
 	return freed, t.after, nil
 }
 
-// releaseDropOut releases every claim of a Felhasznalo who dropped from
-// igen (SetVisszajelzes) or stopped being a Tag (deleteTag).
+// releaseDropOut releases every claim of a Felhasznalo who stopped being a
+// Tag (deleteTag). A drop-out from igen (setVisszajelzes) and removing a
+// Vendeg (RemoveVendeg) release their holder through releaseClaims.
 func (a *App) releaseDropOut(ctx context.Context, q store.Queries, e domain.Esemeny, felhasznaloID string) ([]string, []kiegeszitoJob, error) {
 	holder := domain.ClaimHolder{FelhasznaloID: felhasznaloID}
 	return a.releaseClaims(ctx, q, e, func(h domain.ClaimHolder) bool { return h == holder })

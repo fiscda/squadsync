@@ -193,8 +193,8 @@ func (a *App) runEmlekezteto(ctx context.Context, q store.Queries, j store.Job) 
 
 // emlekeztetoCimzettek are the Felhasznalok to remind of the confirmed
 // Idopont: those with igen or talan on it who count (see
-// countsAsResztvevo), which is the seam where #13 adds Vendegs who are
-// Felhasznalok. A name-only Vendeg has no Felhasznalo to DM.
+// countsAsResztvevo), Tags and Vendegek who are Felhasznalok. A name-only
+// Vendeg has no Felhasznalo to DM.
 func emlekeztetoCimzettek(i domain.Idopont, visszajelzesek []domain.VisszajelzesOfEsemeny) []string {
 	var out []string
 	for _, v := range visszajelzesek {

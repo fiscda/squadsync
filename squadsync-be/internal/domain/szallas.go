@@ -28,16 +28,15 @@ type Agy struct {
 }
 
 // Foglalas is a spot taken in an Agy. A Resztvevo claims one for
-// themselves, a Tag for their name-only Vendeg (#13).
+// themselves, a Tag for their name-only Vendeg.
 type Foglalas struct {
 	AgyID  string
 	Holder ClaimHolder
-	// Name is the sleeper's name, for showing. A name-only Vendeg's is empty
-	// until #13 joins vendeg here.
+	// Name is the sleeper's name (a name-only Vendeg's too), for showing.
 	Name string
 }
 
-// MasholAlszik marks a Resztvevo (or, #13, a name-only Vendeg) who sleeps
+// MasholAlszik marks a Resztvevo (or a name-only Vendeg) who sleeps
 // somewhere else: they hold no spot and need none.
 type MasholAlszik struct {
 	Holder ClaimHolder

@@ -9,7 +9,7 @@ import { requireFelhasznalo } from "../felhasznalo";
 /** Someone sleeping in an Ágy, marked máshol alszik, or without a bed. */
 export type Szemely = {
   felhasznaloId: string;
-  /** A name-only Vendég's id (#13), "" otherwise. */
+  /** A name-only Vendég's id, "" or absent otherwise. */
   vendegId?: string;
   name: string;
 };
@@ -163,32 +163,36 @@ export async function deleteAgy(
   await callBackend<void>(felhasznaloId, "DELETE", agyPath(esemenyId, agyId));
 }
 
-/** The caller takes a spot in the Ágy. */
+/** The caller takes a spot in the Ágy, or one for their name-only Vendég. */
 export async function claimAgy(
   felhasznaloId: string,
   esemenyId: string,
   agyId: string,
+  vendegId = "",
 ): Promise<void> {
   await callBackend<void>(
     felhasznaloId,
     "POST",
     `${agyPath(esemenyId, agyId)}/foglalas`,
-    {},
+    { vendegId },
   );
 }
 
 /**
- * Takes a spot away: the caller's, or (the Szervező only) another
- * Felhasználó's.
+ * Takes a spot away: the caller's, their name-only Vendég's (vendegId), or
+ * (the Szervező only) another Felhasználó's.
  */
 export async function releaseFoglalas(
   felhasznaloId: string,
   esemenyId: string,
   targetId?: string,
+  vendegId = "",
 ): Promise<void> {
-  const query = targetId
-    ? `?felhasznaloId=${encodeURIComponent(targetId)}`
-    : "";
+  const query = vendegId
+    ? `?vendegId=${encodeURIComponent(vendegId)}`
+    : targetId
+      ? `?felhasznaloId=${encodeURIComponent(targetId)}`
+      : "";
   await callBackend<void>(
     felhasznaloId,
     "DELETE",
@@ -211,15 +215,17 @@ export async function moveAlvo(
   );
 }
 
+/** Marks the caller (or their name-only Vendég) máshol alszik, or unmarks them. */
 export async function setMasholAlszik(
   felhasznaloId: string,
   esemenyId: string,
   on: boolean,
+  vendegId = "",
 ): Promise<void> {
   await callBackend<void>(
     felhasznaloId,
     "PUT",
     `${base(esemenyId)}/mashol-alszik`,
-    { on },
+    { on, vendegId },
   );
 }

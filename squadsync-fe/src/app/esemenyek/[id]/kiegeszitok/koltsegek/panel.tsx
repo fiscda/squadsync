@@ -1,3 +1,4 @@
+import { resztvevoKey } from "@/lib/backend";
 import {
   getKoltsegek,
   type KiadasAllas,
@@ -28,9 +29,12 @@ export async function KoltsegekPanel({
     return null;
   }
   const { kiadasok, canAdd } = koltsegek;
+  // Name-only Vendégek are in the split (charged to their Tag) but never
+  // pay; their key is "v:<vendegId>" (see resztvevoKey).
   const resztvevok: KiadasFormPerson[] = esemeny.resztvevok.map((r) => ({
-    id: r.felhasznaloId,
-    name: r.name,
+    id: resztvevoKey(r),
+    name: r.vendegId !== "" ? `${r.name} (vendég)` : r.name,
+    canPay: r.vendegId === "",
   }));
   const isResztvevo = resztvevok.some((p) => p.id === felhasznaloId);
   const locked =
@@ -78,7 +82,7 @@ export async function KoltsegekPanel({
                 amount: null,
                 payerId: isResztvevo
                   ? felhasznaloId
-                  : (resztvevok[0]?.id ?? ""),
+                  : (resztvevok.find((p) => p.canPay)?.id ?? ""),
                 allapot: "kifizetve",
                 reszek: Object.fromEntries(resztvevok.map((p) => [p.id, 0])),
                 egyedi: false,
@@ -115,8 +119,12 @@ function KiadasItem({
   // People already in it stay editable even if they dropped out.
   const people = [...resztvevok];
   for (const p of [
-    { id: kiadas.payerId, name: kiadas.payerName },
-    ...kiadas.reszek.map((r) => ({ id: r.felhasznaloId, name: r.name })),
+    { id: kiadas.payerId, name: kiadas.payerName, canPay: true },
+    ...kiadas.reszek.map((r) => ({
+      id: resztvevoKey(r),
+      name: r.vendegId !== "" ? `${r.name} (vendég)` : r.name,
+      canPay: r.vendegId === "",
+    })),
   ]) {
     if (p.id !== "" && !people.some((q) => q.id === p.id)) {
       people.push(p);
@@ -202,7 +210,7 @@ function KiadasItem({
                 payerId: kiadas.payerId,
                 allapot: kiadas.allapot,
                 reszek: Object.fromEntries(
-                  kiadas.reszek.map((r) => [r.felhasznaloId, r.amount]),
+                  kiadas.reszek.map((r) => [resztvevoKey(r), r.amount]),
                 ),
                 egyedi: !kiadas.egyenlo,
               }}

@@ -198,15 +198,16 @@ func (q Queries) DeleteAgy(ctx context.Context, id string) error {
 }
 
 // ListFoglalasok returns every spot taken in the Esemeny's Agyak, ordered
-// by the sleeper's name. A name-only Vendeg's (#13) has an empty name until
-// #13 joins vendeg here.
+// by the sleeper's name (a name-only Vendeg's by
+// their name too).
 func (q Queries) ListFoglalasok(ctx context.Context, esemenyID string) ([]domain.Foglalas, error) {
 	rows, err := q.db.QueryContext(ctx,
-		`SELECT g.agy_id, COALESCE(g.felhasznalo_id, ''), COALESCE(g.vendeg_id, ''), COALESCE(f.name, '')
+		`SELECT g.agy_id, COALESCE(g.felhasznalo_id, ''), COALESCE(g.vendeg_id, ''), COALESCE(f.name, vg.name, '')
 		 FROM agy_foglalas g
 		 LEFT JOIN felhasznalo f ON f.id = g.felhasznalo_id
+		 LEFT JOIN vendeg vg ON vg.id = g.vendeg_id
 		 WHERE g.esemeny_id = ?
-		 ORDER BY COALESCE(f.name, ''), g.felhasznalo_id, g.vendeg_id`,
+		 ORDER BY COALESCE(f.name, vg.name, ''), g.felhasznalo_id, g.vendeg_id`,
 		esemenyID,
 	)
 	if err != nil {
@@ -259,11 +260,12 @@ func (q Queries) DeleteFoglalas(ctx context.Context, esemenyID string, h domain.
 // ordered by name.
 func (q Queries) ListMasholAlszik(ctx context.Context, esemenyID string) ([]domain.MasholAlszik, error) {
 	rows, err := q.db.QueryContext(ctx,
-		`SELECT COALESCE(m.felhasznalo_id, ''), COALESCE(m.vendeg_id, ''), COALESCE(f.name, '')
+		`SELECT COALESCE(m.felhasznalo_id, ''), COALESCE(m.vendeg_id, ''), COALESCE(f.name, vg.name, '')
 		 FROM mashol_alszik m
 		 LEFT JOIN felhasznalo f ON f.id = m.felhasznalo_id
+		 LEFT JOIN vendeg vg ON vg.id = m.vendeg_id
 		 WHERE m.esemeny_id = ?
-		 ORDER BY COALESCE(f.name, ''), m.felhasznalo_id, m.vendeg_id`,
+		 ORDER BY COALESCE(f.name, vg.name, ''), m.felhasznalo_id, m.vendeg_id`,
 		esemenyID,
 	)
 	if err != nil {

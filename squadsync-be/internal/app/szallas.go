@@ -25,7 +25,7 @@ import (
 //     or an Agy, and lower an Agy's femohely, but not below the people
 //     sleeping in it (delete the Agy for that).
 //   - Spots, only while the Esemeny is Veglegesitve: a Resztvevo claims one
-//     for themselves, a Tag for their Vendeg (#13). At most one spot per
+//     for themselves, a Tag for their name-only Vendeg. At most one spot per
 //     person, so moving means leaving first; an Agy never holds more than
 //     its femohely, so two people claiming a double Agy share it. Anyone
 //     leaves their own spot.
@@ -81,7 +81,7 @@ type AgyInput struct {
 }
 
 // FoglalasInput says whose spot a call is about: a Felhasznalo (empty: the
-// caller) or the caller's name-only Vendeg (#13).
+// caller) or the caller's name-only Vendeg.
 type FoglalasInput struct {
 	FelhasznaloID string
 	VendegID      string
@@ -430,8 +430,9 @@ func (a *App) DeleteSzoba(ctx context.Context, felhasznaloID, esemenyID, szobaID
 }
 
 // szobaGoneJobs queues the DMs that tell the sleepers of a deleted Szoba to
-// claim a new Agy. Only Felhasznalok are told: a name-only Vendeg (#13) has
-// no Discord, and #13 decides whether their Tag is told instead. It
+// claim a new Agy. Only Felhasznalok are told (a Vendeg who is one too): a
+// name-only Vendeg has no Discord, and their Tag isn't told on their behalf
+// (they see it on the web). It
 // captures plain values only.
 func (a *App) szobaGoneJobs(e domain.Esemeny, szobaName string, alvok []domain.Foglalas) []kiegeszitoJob {
 	dm := gateway.SzallasDM{SzobaName: szobaName, Title: e.Title, Link: a.esemenyURL(e.ID)}
@@ -536,7 +537,7 @@ func (a *App) DeleteAgy(ctx context.Context, felhasznaloID, esemenyID, agyID str
 	return nil
 }
 
-// ClaimAgy gives the caller (or their name-only Vendeg, #13) a spot in an
+// ClaimAgy gives the caller (or their name-only Vendeg) a spot in an
 // Agy. The holder is the caller unless in names their Vendeg; anyone else
 // gets ErrNotPermitted (the Szervezo moves people with MoveAlvo). Claiming
 // the spot they already hold changes nothing. Errors, besides those of
@@ -624,7 +625,7 @@ func (a *App) sleep(ctx context.Context, q store.Queries, e domain.Esemeny, agy 
 	return q.SetFoglalas(ctx, e.ID, agy.ID, holder, a.clock.Now())
 }
 
-// ReleaseFoglalas takes the caller's spot (or their Vendeg's, #13) away. The
+// ReleaseFoglalas takes the caller's spot (or their name-only Vendeg's) away. The
 // Szervezo may take anyone's: in names them. Anyone else's gets
 // ErrNotPermitted. Having no spot changes nothing. Errors are those of
 // requireKiegeszitoOn and requireClaimAllowedBy.
@@ -648,7 +649,7 @@ func (a *App) ReleaseFoglalas(ctx context.Context, felhasznaloID, esemenyID stri
 }
 
 // MasholAlszikInput marks or unmarks "máshol alszik". VendegID is the
-// caller's name-only Vendeg (#13), "" for the caller.
+// caller's name-only Vendeg, "" for the caller.
 type MasholAlszikInput struct {
 	On       bool
 	VendegID string

@@ -83,7 +83,7 @@ func TestPartialClaimsAndWhatIsStillMissing(t *testing.T) {
 		t.Fatalf("claiming an unknown Tetel: err = %v, want ErrNotFound", err)
 	}
 	if err := h.App.SetVallalas(ctx, "anna", d.ID, sator.ID, app.VallalasInput{Quantity: 1, VendegID: "v1"}); !errors.Is(err, app.ErrNotFound) {
-		t.Fatalf("claiming for a Vendeg before #13: err = %v, want ErrNotFound", err)
+		t.Fatalf("claiming for an unknown Vendeg: err = %v, want ErrNotFound", err)
 	}
 }
 

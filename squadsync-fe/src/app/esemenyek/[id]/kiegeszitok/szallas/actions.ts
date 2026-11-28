@@ -127,3 +127,36 @@ export async function setMasholAlszikAction(esemenyId: string, on: boolean) {
     setMasholAlszik(felhasznaloId, esemenyId, on),
   );
 }
+
+/** Gives the caller's name-only Vendég a spot in the Ágy picked in the form. */
+export async function claimAgyForVendegAction(
+  esemenyId: string,
+  vendegId: string,
+  formData: FormData,
+) {
+  const agyId = String(formData.get("agyId") ?? "");
+  await runKiegeszitoChange(esemenyId, (felhasznaloId) =>
+    claimAgy(felhasznaloId, esemenyId, agyId, vendegId),
+  );
+}
+
+/** Takes the caller's name-only Vendég out of their Ágy. */
+export async function releaseFoglalasForVendegAction(
+  esemenyId: string,
+  vendegId: string,
+) {
+  await runKiegeszitoChange(esemenyId, (felhasznaloId) =>
+    releaseFoglalas(felhasznaloId, esemenyId, undefined, vendegId),
+  );
+}
+
+/** Marks the caller's name-only Vendég máshol alszik, or unmarks them. */
+export async function setMasholAlszikForVendegAction(
+  esemenyId: string,
+  vendegId: string,
+  on: boolean,
+) {
+  await runKiegeszitoChange(esemenyId, (felhasznaloId) =>
+    setMasholAlszik(felhasznaloId, esemenyId, on, vendegId),
+  );
+}

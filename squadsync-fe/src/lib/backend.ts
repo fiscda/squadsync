@@ -712,11 +712,18 @@ export type EsemenySummary = Esemeny & {
 };
 
 export type VisszajelzesOfEsemeny = {
+  /** "" for a name-only Vendég, whose id is vendegId. */
   felhasznaloId: string;
+  /** A name-only Vendég's id, "" otherwise. */
+  vendegId: string;
   name: string;
   valasz: Valasz;
-  /** False for someone who is no longer a Tag: they don't count. */
+  /** False for a Vendég, or someone who is no longer a Tag. */
   isTag: boolean;
+  /** A Vendég of the Esemény (shown as "vendég" unless also a Tag). */
+  isVendeg: boolean;
+  /** The Tag who answers for a name-only Vendég, "" otherwise. */
+  vendegAddedBy: string;
   /** RFC 3339, UTC */
   updatedAt: string;
 };
@@ -733,10 +740,14 @@ export type Idopont = {
    */
   egeszNapos: boolean;
   addedBy: string;
-  /** Counts of Tags' Visszajelzések. */
+  /** Counts of Tags' Visszajelzések (the Helyezés counts only these). */
   igen: number;
   talan: number;
   nem: number;
+  /** Counts of the Vendégek' Visszajelzések, on top of the Tags'. */
+  vendegIgen: number;
+  vendegTalan: number;
+  vendegNem: number;
   /** 1 is first; null when no Tag has answered. */
   helyezes: number | null;
   /** The caller's own answer, null if none. */
@@ -754,11 +765,43 @@ export type Idopont = {
   removable: boolean;
 };
 
-/** Someone with igen on the confirmed Időpont. */
+/** Someone with igen on the confirmed Időpont: a Tag or a Vendég. */
 export type Resztvevo = {
+  /** "" for a name-only Vendég, whose id is vendegId. */
   felhasznaloId: string;
+  /** A name-only Vendég's id, "" otherwise. */
+  vendegId: string;
   name: string;
   isTag: boolean;
+  isVendeg: boolean;
+  /** The Tag of a name-only Vendég (who claims for them), "" otherwise. */
+  addedBy: string;
+};
+
+/** The key of a Résztvevő in a list: their Felhasználó or Vendég id. */
+export function resztvevoKey(r: {
+  felhasznaloId: string;
+  vendegId: string;
+}): string {
+  return r.vendegId !== "" ? `v:${r.vendegId}` : r.felhasznaloId;
+}
+
+/** A Vendég of an Esemény, as the caller sees them. */
+export type Vendeg = {
+  id: string;
+  /** "felhasznalo": joined through an Esemény-meghívó; "nev": a name a Tag added. */
+  kind: "felhasznalo" | "nev";
+  felhasznaloId: string;
+  name: string;
+  /** The Tag who added a name-only Vendég, "" otherwise. */
+  addedBy: string;
+  addedByName: string;
+  /** RFC 3339, UTC */
+  createdAt: string;
+  /** The caller answers and claims for them. */
+  canAnswer: boolean;
+  /** The caller may remove them. */
+  canRemove: boolean;
 };
 
 export type EsemenyDetail = Esemeny & {
@@ -774,6 +817,10 @@ export type EsemenyDetail = Esemeny & {
   hatarido: string | null;
   /** Every Kiegészítő that exists (is built), in display order. */
   kiegeszitok: Kiegeszito[];
+  /** The caller is a Vendég: csoportName is "" and Tag-only parts hide. */
+  viewerIsVendeg: boolean;
+  /** Ordered by name. */
+  vendegek: Vendeg[];
 };
 
 export type EsemenyInput = {

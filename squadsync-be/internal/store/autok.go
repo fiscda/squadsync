@@ -103,15 +103,16 @@ func (q Queries) DeleteAuto(ctx context.Context, id string) error {
 }
 
 // ListUtasokOfEsemeny returns every seat taken in the Esemeny's Autok,
-// ordered by the passenger's name. A name-only Vendeg's (#13) has an empty
-// name until #13 joins vendeg here.
+// ordered by the passenger's name (a name-only
+// Vendeg's by their name too).
 func (q Queries) ListUtasokOfEsemeny(ctx context.Context, esemenyID string) ([]domain.Utas, error) {
 	rows, err := q.db.QueryContext(ctx,
-		`SELECT u.auto_id, COALESCE(u.felhasznalo_id, ''), COALESCE(u.vendeg_id, ''), COALESCE(f.name, '')
+		`SELECT u.auto_id, COALESCE(u.felhasznalo_id, ''), COALESCE(u.vendeg_id, ''), COALESCE(f.name, vg.name, '')
 		 FROM auto_utas u
 		 LEFT JOIN felhasznalo f ON f.id = u.felhasznalo_id
+		 LEFT JOIN vendeg vg ON vg.id = u.vendeg_id
 		 WHERE u.esemeny_id = ?
-		 ORDER BY COALESCE(f.name, ''), u.felhasznalo_id, u.vendeg_id`,
+		 ORDER BY COALESCE(f.name, vg.name, ''), u.felhasznalo_id, u.vendeg_id`,
 		esemenyID,
 	)
 	if err != nil {
@@ -164,11 +165,12 @@ func (q Queries) DeleteUles(ctx context.Context, esemenyID string, h domain.Clai
 // by name.
 func (q Queries) ListSajatUton(ctx context.Context, esemenyID string) ([]domain.SajatUton, error) {
 	rows, err := q.db.QueryContext(ctx,
-		`SELECT COALESCE(s.felhasznalo_id, ''), COALESCE(s.vendeg_id, ''), COALESCE(f.name, '')
+		`SELECT COALESCE(s.felhasznalo_id, ''), COALESCE(s.vendeg_id, ''), COALESCE(f.name, vg.name, '')
 		 FROM sajat_uton s
 		 LEFT JOIN felhasznalo f ON f.id = s.felhasznalo_id
+		 LEFT JOIN vendeg vg ON vg.id = s.vendeg_id
 		 WHERE s.esemeny_id = ?
-		 ORDER BY COALESCE(f.name, ''), s.felhasznalo_id, s.vendeg_id`,
+		 ORDER BY COALESCE(f.name, vg.name, ''), s.felhasznalo_id, s.vendeg_id`,
 		esemenyID,
 	)
 	if err != nil {

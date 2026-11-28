@@ -36,7 +36,7 @@ type autoJSON struct {
 
 type utasJSON struct {
 	FelhasznaloID string `json:"felhasznaloId"`
-	// VendegID is a name-only Vendeg's id (#13), "" otherwise.
+	// VendegID is a name-only Vendeg's id, "" otherwise.
 	VendegID string `json:"vendegId"`
 	Name     string `json:"name"`
 }
@@ -162,7 +162,7 @@ func (s *server) deleteAuto(w http.ResponseWriter, r *http.Request, felhasznaloI
 // utasBody names whose seat a request is about; both empty means the caller.
 type utasBody struct {
 	FelhasznaloID string `json:"felhasznaloId"`
-	// VendegID is the caller's name-only Vendeg (#13).
+	// VendegID is the caller's name-only Vendeg.
 	VendegID string `json:"vendegId"`
 }
 
@@ -195,7 +195,7 @@ func (s *server) moveUtas(w http.ResponseWriter, r *http.Request, felhasznaloID 
 }
 
 // releaseUles takes a seat away: the caller's, or, with ?felhasznaloId= (the
-// Szervezo only) or ?vendegId= (#13), someone else's.
+// Szervezo only) or ?vendegId= (a name-only Vendeg), someone else's.
 func (s *server) releaseUles(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
 	in := app.UtasInput{FelhasznaloID: r.URL.Query().Get("felhasznaloId"), VendegID: r.URL.Query().Get("vendegId")}
 	if err := s.app.ReleaseUles(r.Context(), felhasznaloID, r.PathValue("id"), in); err != nil {
@@ -208,7 +208,7 @@ func (s *server) releaseUles(w http.ResponseWriter, r *http.Request, felhasznalo
 func (s *server) setSajatUton(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
 	var body struct {
 		On bool `json:"on"`
-		// VendegID is the caller's name-only Vendeg (#13).
+		// VendegID is the caller's name-only Vendeg.
 		VendegID string `json:"vendegId"`
 	}
 	if !decodeJSON(w, r, &body) {

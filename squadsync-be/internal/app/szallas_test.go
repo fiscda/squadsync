@@ -250,7 +250,7 @@ func TestClaimingASpotNeedsAResztvevoInVeglegesitve(t *testing.T) {
 	if err := h.App.ClaimAgy(ctx, "bela", e.ID, "no-such-agy", app.FoglalasInput{}); !errors.Is(err, app.ErrNotFound) {
 		t.Fatalf("an unknown Agy: err = %v, want ErrNotFound", err)
 	}
-	// A name-only Vendeg isn't there before #13.
+	// An unknown name-only Vendeg.
 	if err := h.App.ClaimAgy(ctx, "bela", e.ID, agy.ID, app.FoglalasInput{VendegID: "v1"}); !errors.Is(err, app.ErrNotFound) {
 		t.Fatalf("a Vendeg: err = %v, want ErrNotFound", err)
 	}

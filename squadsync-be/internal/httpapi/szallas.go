@@ -28,7 +28,7 @@ func (s *server) registerSzallas(mux *http.ServeMux) {
 
 type szemelyJSON struct {
 	FelhasznaloID string `json:"felhasznaloId"`
-	// VendegID is a name-only Vendeg's id (#13), "" otherwise.
+	// VendegID is a name-only Vendeg's id, "" otherwise.
 	VendegID string `json:"vendegId"`
 	Name     string `json:"name"`
 }
@@ -203,7 +203,7 @@ func (s *server) deleteAgy(w http.ResponseWriter, r *http.Request, felhasznaloID
 // caller.
 type foglalasBody struct {
 	FelhasznaloID string `json:"felhasznaloId"`
-	// VendegID is the caller's name-only Vendeg (#13).
+	// VendegID is the caller's name-only Vendeg.
 	VendegID string `json:"vendegId"`
 }
 
@@ -236,7 +236,7 @@ func (s *server) moveAlvo(w http.ResponseWriter, r *http.Request, felhasznaloID 
 }
 
 // releaseFoglalas takes a spot away: the caller's, or, with
-// ?felhasznaloId= (the Szervezo only) or ?vendegId= (#13), someone else's.
+// ?felhasznaloId= (the Szervezo only) or ?vendegId= (a name-only Vendeg), someone else's.
 func (s *server) releaseFoglalas(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
 	in := app.FoglalasInput{FelhasznaloID: r.URL.Query().Get("felhasznaloId"), VendegID: r.URL.Query().Get("vendegId")}
 	if err := s.app.ReleaseFoglalas(r.Context(), felhasznaloID, r.PathValue("id"), in); err != nil {
@@ -249,7 +249,7 @@ func (s *server) releaseFoglalas(w http.ResponseWriter, r *http.Request, felhasz
 func (s *server) setMasholAlszik(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
 	var body struct {
 		On bool `json:"on"`
-		// VendegID is the caller's name-only Vendeg (#13).
+		// VendegID is the caller's name-only Vendeg.
 		VendegID string `json:"vendegId"`
 	}
 	if !decodeJSON(w, r, &body) {

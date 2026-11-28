@@ -50,10 +50,16 @@ type esemenySummaryJSON struct {
 }
 
 type visszajelzesJSON struct {
-	FelhasznaloID string    `json:"felhasznaloId"`
-	Name          string    `json:"name"`
-	Valasz        string    `json:"valasz"`
-	IsTag         bool      `json:"isTag"`
+	// FelhasznaloID is "" for a name-only Vendeg, whose id is VendegID.
+	FelhasznaloID string `json:"felhasznaloId"`
+	VendegID      string `json:"vendegId"`
+	Name          string `json:"name"`
+	Valasz        string `json:"valasz"`
+	IsTag         bool   `json:"isTag"`
+	// IsVendeg: a Vendeg of the Esemeny (shown as "vendég" unless IsTag).
+	IsVendeg bool `json:"isVendeg"`
+	// VendegAddedBy is the Tag who answers for a name-only Vendeg.
+	VendegAddedBy string    `json:"vendegAddedBy"`
 	UpdatedAt     time.Time `json:"updatedAt"`
 }
 
@@ -67,6 +73,11 @@ type idopontJSON struct {
 	Igen       int    `json:"igen"`
 	Talan      int    `json:"talan"`
 	Nem        int    `json:"nem"`
+	// VendegIgen, VendegTalan and VendegNem count the Vendegek, on top of
+	// igen, talan and nem (the Tags'), and never toward the Helyezes.
+	VendegIgen  int `json:"vendegIgen"`
+	VendegTalan int `json:"vendegTalan"`
+	VendegNem   int `json:"vendegNem"`
 	// Helyezes is null when no Tag has answered.
 	Helyezes *int `json:"helyezes"`
 	// Sajat is the caller's own answer, null if none.
@@ -81,9 +92,14 @@ type idopontJSON struct {
 }
 
 type resztvevoJSON struct {
+	// FelhasznaloID is "" for a name-only Vendeg, whose id is VendegID.
 	FelhasznaloID string `json:"felhasznaloId"`
+	VendegID      string `json:"vendegId"`
 	Name          string `json:"name"`
 	IsTag         bool   `json:"isTag"`
+	IsVendeg      bool   `json:"isVendeg"`
+	// AddedBy is the Tag of a name-only Vendeg, "" otherwise.
+	AddedBy string `json:"addedBy"`
 }
 
 type esemenyDetailJSON struct {
@@ -100,6 +116,11 @@ type esemenyDetailJSON struct {
 	Kiegeszitok []kiegeszitoJSON `json:"kiegeszitok"`
 	// Hatarido is the voting deadline, null for none.
 	Hatarido *time.Time `json:"hatarido"`
+	// ViewerIsVendeg: the caller is a Vendeg, who sees the Esemeny without
+	// its Csoport (csoportName is "").
+	ViewerIsVendeg bool `json:"viewerIsVendeg"`
+	// Vendegek are the Esemeny's Vendegek, ordered by name.
+	Vendegek []vendegJSON `json:"vendegek"`
 }
 
 func toEsemenyJSON(e domain.Esemeny) esemenyJSON {
@@ -125,6 +146,9 @@ func toIdopontJSON(a app.IdopontAllas) idopontJSON {
 		Igen:           a.Igen,
 		Talan:          a.Talan,
 		Nem:            a.Nem,
+		VendegIgen:     a.VendegIgen,
+		VendegTalan:    a.VendegTalan,
+		VendegNem:      a.VendegNem,
 		Visszajelzesek: make([]visszajelzesJSON, 0, len(a.Visszajelzesek)),
 		Answerable:     a.Answerable,
 		Confirmed:      a.Confirmed,
@@ -141,9 +165,12 @@ func toIdopontJSON(a app.IdopontAllas) idopontJSON {
 	for _, v := range a.Visszajelzesek {
 		out.Visszajelzesek = append(out.Visszajelzesek, visszajelzesJSON{
 			FelhasznaloID: v.FelhasznaloID,
+			VendegID:      v.VendegID,
 			Name:          v.FelhasznaloName,
 			Valasz:        string(v.Valasz),
 			IsTag:         v.IsTag,
+			IsVendeg:      v.IsVendeg,
+			VendegAddedBy: v.VendegAddedBy,
 			UpdatedAt:     v.UpdatedAt,
 		})
 	}
@@ -210,7 +237,14 @@ func (s *server) getEsemeny(w http.ResponseWriter, r *http.Request, felhasznaloI
 	}
 	resztvevok := make([]resztvevoJSON, 0, len(d.Resztvevok))
 	for _, r := range d.Resztvevok {
-		resztvevok = append(resztvevok, resztvevoJSON{FelhasznaloID: r.FelhasznaloID, Name: r.Name, IsTag: r.IsTag})
+		resztvevok = append(resztvevok, resztvevoJSON{
+			FelhasznaloID: r.FelhasznaloID, VendegID: r.VendegID, Name: r.Name,
+			IsTag: r.IsTag, IsVendeg: r.IsVendeg, AddedBy: r.AddedBy,
+		})
+	}
+	vendegek := make([]vendegJSON, 0, len(d.Vendegek))
+	for _, v := range d.Vendegek {
+		vendegek = append(vendegek, toVendegJSON(v))
 	}
 	writeJSON(w, http.StatusOK, esemenyDetailJSON{
 		esemenyJSON:        toEsemenyJSON(d.Esemeny),
@@ -221,6 +255,8 @@ func (s *server) getEsemeny(w http.ResponseWriter, r *http.Request, felhasznaloI
 		ConfirmedIdopontID: nullable(d.ConfirmedIdopont),
 		Kiegeszitok:        toKiegeszitokJSON(d.Kiegeszitok),
 		Hatarido:           d.Hatarido,
+		ViewerIsVendeg:     d.ViewerIsVendeg,
+		Vendegek:           vendegek,
 	})
 }
 

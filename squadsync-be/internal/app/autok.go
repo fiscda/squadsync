@@ -25,7 +25,7 @@ import (
 //     and a Sofor holds no seat and isn't "saját úton": offering removes
 //     both.
 //   - Seats: a Resztvevo claims one for themselves, a Tag for their
-//     Vendeg (#13). At most one seat per person, so moving means leaving
+//     name-only Vendeg. At most one seat per person, so moving means leaving
 //     first; nobody can overbook an Auto.
 //   - The Szervezo moves anyone to another Auto (with a free seat) or
 //     removes them from a seat.
@@ -80,7 +80,7 @@ type AutoInput struct {
 }
 
 // UtasInput says whose seat a call is about: a Felhasznalo (empty: the
-// caller) or the caller's name-only Vendeg (#13).
+// caller) or the caller's name-only Vendeg.
 type UtasInput struct {
 	FelhasznaloID string
 	VendegID      string
@@ -520,8 +520,9 @@ func (a *App) DeleteAuto(ctx context.Context, felhasznaloID, esemenyID, autoID s
 
 // autoGoneJobs queues the DMs that tell the passengers of an Auto that it is
 // gone, except those the skip function names (who are released too). Only
-// Felhasznalok are told: a name-only Vendeg (#13) has no Discord, and #13
-// decides whether their Tag is told instead. It captures plain values only.
+// Felhasznalok are told (a Vendeg who is one too): a name-only Vendeg has
+// no Discord, and their Tag isn't told on their behalf (they see it on the
+// web). It captures plain values only.
 func (a *App) autoGoneJobs(e domain.Esemeny, auto domain.Auto, utasok []domain.Utas, skip func(domain.ClaimHolder) bool, deleted bool) []kiegeszitoJob {
 	dm := gateway.AutoDM{SoforName: auto.SoforName, Title: e.Title, Deleted: deleted, Link: a.esemenyURL(e.ID)}
 	csoportID := e.CsoportID
@@ -538,7 +539,7 @@ func (a *App) autoGoneJobs(e domain.Esemeny, auto domain.Auto, utasok []domain.U
 	return jobs
 }
 
-// ClaimUles gives the caller (or, #13, their name-only Vendeg) a seat in an
+// ClaimUles gives the caller (or their name-only Vendeg) a seat in an
 // Auto. The holder is the caller unless in names their Vendeg; anyone else
 // gets ErrNotPermitted (the Szervezo moves people with MoveUtas). Claiming
 // the seat they already hold changes nothing. Errors, besides those of
@@ -630,7 +631,7 @@ func (a *App) seat(ctx context.Context, q store.Queries, e domain.Esemeny, auto 
 	return q.SetUles(ctx, e.ID, auto.ID, holder, a.clock.Now())
 }
 
-// ReleaseUles takes the caller's seat (or their Vendeg's, #13) away. The
+// ReleaseUles takes the caller's seat (or their name-only Vendeg's) away. The
 // Szervezo may take anyone's: in names them. Anyone else's gets
 // ErrNotPermitted. Having no seat changes nothing. Errors are those of
 // requireKiegeszitoOn and requireClaimAllowedBy.
@@ -654,7 +655,7 @@ func (a *App) ReleaseUles(ctx context.Context, felhasznaloID, esemenyID string, 
 }
 
 // SajatUtonInput marks or unmarks "saját úton". VendegID is the caller's
-// name-only Vendeg (#13), "" for the caller.
+// name-only Vendeg, "" for the caller.
 type SajatUtonInput struct {
 	On       bool
 	VendegID string

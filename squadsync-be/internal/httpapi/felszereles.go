@@ -31,7 +31,7 @@ type tetelJSON struct {
 
 type vallalasJSON struct {
 	FelhasznaloID string `json:"felhasznaloId"`
-	// VendegID is a name-only Vendeg's id (#13), "" otherwise.
+	// VendegID is a name-only Vendeg's id, "" otherwise.
 	VendegID string `json:"vendegId"`
 	Name     string `json:"name"`
 	Quantity int    `json:"quantity"`
@@ -138,7 +138,7 @@ func (s *server) setVallalas(w http.ResponseWriter, r *http.Request, felhasznalo
 	var body struct {
 		// Quantity 0 removes the claim.
 		Quantity int `json:"quantity"`
-		// VendegID claims for the caller's name-only Vendeg (#13).
+		// VendegID claims for the caller's name-only Vendeg.
 		VendegID string `json:"vendegId"`
 	}
 	if !decodeJSON(w, r, &body) {

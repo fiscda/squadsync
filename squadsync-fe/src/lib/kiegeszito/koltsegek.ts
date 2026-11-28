@@ -28,7 +28,7 @@ export type Kiadas = {
 /** One person's share of a Kiadás. */
 export type KiadasResz = {
   felhasznaloId: string;
-  /** A name-only Vendég's id (#13), "" otherwise. */
+  /** A name-only Vendég's id, "" otherwise. */
   vendegId: string;
   name: string;
   amount: number;
@@ -75,7 +75,7 @@ export type ElszamolasAllapot =
 
 export type ElszamolasSzemely = {
   felhasznaloId: string;
-  /** A name-only Vendég's id (#13), "" otherwise. */
+  /** A name-only Vendég's id, "" otherwise. */
   vendegId: string;
   name: string;
 };

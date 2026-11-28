@@ -98,3 +98,36 @@ export async function addUzemanyagAction(
     addUzemanyag(felhasznaloId, esemenyId, autoId, input),
   );
 }
+
+/** Seats the caller's name-only Vendég in the Autó picked in the form. */
+export async function claimUlesForVendegAction(
+  esemenyId: string,
+  vendegId: string,
+  formData: FormData,
+) {
+  const autoId = String(formData.get("autoId") ?? "");
+  await runKiegeszitoChange(esemenyId, (felhasznaloId) =>
+    claimUles(felhasznaloId, esemenyId, autoId, vendegId),
+  );
+}
+
+/** Takes the caller's name-only Vendég out of their seat. */
+export async function releaseUlesForVendegAction(
+  esemenyId: string,
+  vendegId: string,
+) {
+  await runKiegeszitoChange(esemenyId, (felhasznaloId) =>
+    releaseUles(felhasznaloId, esemenyId, undefined, vendegId),
+  );
+}
+
+/** Marks the caller's name-only Vendég saját úton, or unmarks them. */
+export async function setSajatUtonForVendegAction(
+  esemenyId: string,
+  vendegId: string,
+  on: boolean,
+) {
+  await runKiegeszitoChange(esemenyId, (felhasznaloId) =>
+    setSajatUton(felhasznaloId, esemenyId, on, vendegId),
+  );
+}

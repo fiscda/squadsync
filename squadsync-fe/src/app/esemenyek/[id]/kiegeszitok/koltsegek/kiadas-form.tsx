@@ -8,7 +8,11 @@ import { formatFt } from "./ft";
 const inputClass =
   "rounded-lg border border-zinc-300 bg-transparent px-3 py-1.5 text-sm dark:border-zinc-700";
 
-export type KiadasFormPerson = { id: string; name: string };
+/**
+ * Someone who can be in the split: id is their Felhasználó id, or
+ * "v:<vendegId>" for a name-only Vendég (see resztvevoKey), who can't pay.
+ */
+export type KiadasFormPerson = { id: string; name: string; canPay: boolean };
 
 export type KiadasFormDefaults = {
   description: string;
@@ -106,11 +110,13 @@ export function KiadasForm({
             defaultValue={defaults.payerId}
             className={inputClass}
           >
-            {people.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
+            {people
+              .filter((p) => p.canPay)
+              .map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
           </select>
         </label>
       </div>

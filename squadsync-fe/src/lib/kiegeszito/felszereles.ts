@@ -21,7 +21,7 @@ export type Tetel = {
 /** Part of a Tétel claimed by someone. */
 export type Vallalas = {
   felhasznaloId: string;
-  /** A name-only Vendég's id (#13), "" otherwise. */
+  /** A name-only Vendég's id, "" otherwise. */
   vendegId: string;
   name: string;
   quantity: number;
@@ -119,17 +119,21 @@ export async function deleteTetel(
   );
 }
 
-/** Sets how many of the Tétel the caller claims; 0 removes the claim. */
+/**
+ * Sets how many of the Tétel the caller (or, with vendegId, their name-only
+ * Vendég) claims; 0 removes the claim.
+ */
 export async function setVallalas(
   felhasznaloId: string,
   esemenyId: string,
   tetelId: string,
   quantity: number,
+  vendegId = "",
 ): Promise<void> {
   await callBackend<void>(
     felhasznaloId,
     "PUT",
     `${base(esemenyId)}/tetel/${encodeURIComponent(tetelId)}/vallalas`,
-    { quantity },
+    { quantity, vendegId },
   );
 }

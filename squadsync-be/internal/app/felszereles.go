@@ -18,11 +18,13 @@ import (
 //
 // Who may do what:
 //   - Adding a Tetel: any Tag while the Esemeny is in Egyeztetes (there are
-//     no Resztvevok yet, and anyone may help plan); once Veglegesitve, the
-//     Resztvevok and the Szervezo.
+//     no Resztvevok yet, and anyone may help plan, but not a Vendeg); once
+//     Veglegesitve, the Resztvevok (Vendegek too) and the Szervezo.
 //   - Editing or deleting one: whoever added it, or the Szervezo, in
 //     Egyeztetes or Veglegesitve.
-//   - Claiming: Resztvevok, only in Veglegesitve (requireClaimAllowed).
+//   - Claiming: Resztvevok, only in Veglegesitve (requireClaimAllowed): a
+//     Vendeg who is a Felhasznalo for themselves, a Tag for their name-only
+//     Vendeg.
 
 func init() {
 	registerKiegeszito(kiegeszito{
@@ -60,8 +62,8 @@ type TetelInput struct {
 }
 
 // VallalasInput is a claim of part of a Tetel: Quantity pieces (0 removes
-// the claim). VendegID claims for the caller's name-only Vendeg (#13); ""
-// claims for the caller.
+// the claim). VendegID claims for the caller's name-only Vendeg; "" claims
+// for the caller.
 type VallalasInput struct {
 	Quantity int
 	VendegID string
@@ -172,6 +174,11 @@ func felszerelesAllas(ctx context.Context, q store.Queries, esemenyID string) ([
 func canAddTetel(ctx context.Context, q store.Queries, e domain.Esemeny, felhasznaloID string) (bool, error) {
 	switch e.Allapot {
 	case domain.Egyeztetes:
+		if _, err := q.FindTag(ctx, e.CsoportID, felhasznaloID); errors.Is(err, store.ErrNotFound) {
+			return false, nil
+		} else if err != nil {
+			return false, err
+		}
 		return true, nil
 	case domain.Veglegesitve:
 		if e.SzervezoID == felhasznaloID {
@@ -340,7 +347,7 @@ func vallaltOf(ctx context.Context, q store.Queries, t domain.Tetel) (int, error
 	return 0, nil
 }
 
-// SetVallalas sets how many of a Tetel the caller claims (or, #13, their
+// SetVallalas sets how many of a Tetel the caller claims (or their
 // name-only Vendeg), replacing their earlier claim; 0 removes it. At most
 // what is missing plus their own earlier claim can be claimed
 // (ErrVallalasTooMuch). Besides the errors of requireKiegeszitoOn and

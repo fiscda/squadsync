@@ -125,8 +125,9 @@ type KiadasAllas struct {
 }
 
 // Egyenleg is one Felhasznalo's balance over the kifizetve Kiadasok:
-// Fizetett is what they paid, Resz their share, Netto = Fizetett - Resz
-// (positive: they get money back).
+// Fizetett is what they paid, Resz their share (with their name-only
+// Vendegek'), Netto = Fizetett - Resz (positive: they get money back). A
+// Vendeg who is a Felhasznalo has their own.
 type Egyenleg struct {
 	FelhasznaloID string
 	Name          string
@@ -304,8 +305,9 @@ func koltsegekAllas(ctx context.Context, q store.Queries, esemenyID string) ([]K
 	return out, nil
 }
 
-// egyenlegekOf computes everyone's balance over the kifizetve Kiadasok:
-// what they paid, their share and the net (paid - share). Tervezett ones
+// egyenlegekOf computes every Felhasznalo's balance over the kifizetve
+// Kiadasok: what they paid, their share (with the shares of the name-only
+// Vendegek they added) and the net (paid - share). Tervezett ones
 // don't count. It never returns nil; the Netto values add up to 0. The
 // Elszamolas turns these into Utalasok (utalasokOf).
 func egyenlegekOf(kiadasok []KiadasAllas) ([]Egyenleg, error) {
@@ -327,14 +329,13 @@ func egyenlegekOf(kiadasok []KiadasAllas) ([]Egyenleg, error) {
 		}
 		get(k.PayerID, k.PayerName).Fizetett += k.Amount
 		for _, r := range k.Reszek {
-			if r.Holder.VendegID != "" {
-				// #13: a name-only Vendeg's share is charged to the Tag who
-				// added them: map r.Holder.VendegID to that Tag's
-				// Felhasznalo id (and name) here instead of refusing it.
-				// Until then resolveSplit never stores such a share.
-				return nil, fmt.Errorf("kiadas %s: a vendeg share can't be charged to their tag before #13", k.ID)
+			// A name-only Vendeg's share is charged to the Tag who added
+			// them; everyone else's (a Felhasznalo Vendeg's too) to
+			// themselves.
+			if r.ChargedTo == "" {
+				return nil, fmt.Errorf("kiadas %s: a share is charged to nobody", k.ID)
 			}
-			get(r.Holder.FelhasznaloID, r.Name).Resz += r.Amount
+			get(r.ChargedTo, r.ChargedToName).Resz += r.Amount
 		}
 	}
 	out := make([]Egyenleg, 0, len(byID))
@@ -387,8 +388,8 @@ func egyenloReszek(amount int, holders []domain.ClaimHolder) []domain.KiadasResz
 func resolveSplit(in *SplitInput, amount int, resztvevok []domain.Resztvevo, previous []domain.KiadasResz, prevEgyenlo bool) ([]domain.KiadasResz, bool, error) {
 	switch {
 	case in == nil && previous == nil:
-		// Every Resztvevo equally, checked like any other split (so a
-		// name-only Vendeg is refused until #13).
+		// Every Resztvevo equally (name-only Vendegek too), checked like
+		// any other split.
 		in = &SplitInput{}
 		for _, r := range resztvevok {
 			in.Holders = append(in.Holders, domain.HolderOf(r))
@@ -424,11 +425,8 @@ func resolveSplit(in *SplitInput, amount int, resztvevok []domain.Resztvevo, pre
 		if kept[h] {
 			continue
 		}
-		if h.VendegID != "" {
-			// #13 checks the name-only Vendeg here (a Resztvevo of the
-			// Esemeny); until then there is none.
-			return nil, false, fmt.Errorf("%w: no such vendeg", ErrNotFound)
-		}
+		// A name-only Vendeg (their share charged to their Tag) must be a
+		// Resztvevo like anyone else.
 		if !holdsResztvevo(resztvevok, h) {
 			return nil, false, ErrKiadasNotResztvevo
 		}
