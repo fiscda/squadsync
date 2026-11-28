@@ -55,6 +55,55 @@ type DiscordMessenger interface {
 	// SendSzallasDM tells one Discord account of a sleeper that their Szoba
 	// is gone.
 	SendSzallasDM(ctx context.Context, discordID string, d SzallasDM) error
+	// SendElszamolasEmlekeztetoDM reminds one Discord account of a
+	// Resztvevo to confirm their Kiadasok for the Elszamolas.
+	SendElszamolasEmlekeztetoDM(ctx context.Context, discordID string, e ElszamolasEmlekezteto) error
+	// SendElszamolasDM tells one Discord account of a Felhasznalo what the
+	// calculated Elszamolas means for them, with a "megvolt" button on
+	// each Utalas they pay.
+	SendElszamolasDM(ctx context.Context, discordID string, d ElszamolasDM) error
+}
+
+// ElszamolasEmlekezteto reminds a Resztvevo, 3 days after the Esemeny is
+// Lezajlott, to confirm their Kiadasok. Its fields are plain text; the bot
+// words and escapes them.
+type ElszamolasEmlekezteto struct {
+	CsoportName string
+	Title       string
+	// Link is the Esemeny's web page. It may be a localhost URL, shown as
+	// text.
+	Link string
+}
+
+// ElszamolasDM is one Felhasznalo's result of a calculated Elszamolas. Its
+// fields are plain text; the bot words and escapes them. With neither
+// Fizetendo nor Kapando, they are square.
+type ElszamolasDM struct {
+	EsemenyID   string
+	CsoportName string
+	Title       string
+	// Fizetendo are the Utalasok they pay, each to Name.
+	Fizetendo []ElszamolasUtalas
+	// Kapando are the Utalasok they get, each from Name.
+	Kapando []ElszamolasUtalas
+	// Link is the Esemeny's web page. It may be a localhost URL, shown as
+	// text.
+	Link string
+}
+
+// MaxMegvoltButtons is how many "megvolt" buttons fit on one message: 5
+// rows of 5. An ElszamolasDM with more Fizetendo gets none; they are marked
+// on the web.
+const MaxMegvoltButtons = 25
+
+// ElszamolasUtalas is one Utalas in an ElszamolasDM.
+type ElszamolasUtalas struct {
+	// UtalasID identifies it, for its "megvolt" button.
+	UtalasID string
+	// Name is the other party.
+	Name string
+	// Amount is in whole HUF.
+	Amount int
 }
 
 // SzallasDM tells a sleeper that their Szoba was deleted, so they claim a
@@ -341,6 +390,16 @@ func (Disabled) SendHataridoDM(context.Context, string, HataridoDM) error {
 
 // SendAutoDM implements DiscordMessenger.
 func (Disabled) SendAutoDM(context.Context, string, AutoDM) error {
+	return ErrNotConfigured
+}
+
+// SendElszamolasEmlekeztetoDM implements DiscordMessenger.
+func (Disabled) SendElszamolasEmlekeztetoDM(context.Context, string, ElszamolasEmlekezteto) error {
+	return ErrNotConfigured
+}
+
+// SendElszamolasDM implements DiscordMessenger.
+func (Disabled) SendElszamolasDM(context.Context, string, ElszamolasDM) error {
 	return ErrNotConfigured
 }
 

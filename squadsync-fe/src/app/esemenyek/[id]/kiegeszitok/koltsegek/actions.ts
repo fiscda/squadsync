@@ -2,8 +2,13 @@
 
 import {
   addKiadas,
+  closeElszamolas,
+  confirmKiadasok,
   deleteKiadas,
   type KiadasInput,
+  reopenElszamolas,
+  setUtalasMegvolt,
+  unconfirmKiadasok,
   updateKiadas,
 } from "@/lib/kiegeszito/koltsegek";
 import { runKiegeszitoChange } from "../run-change";
@@ -81,5 +86,39 @@ export async function markKifizetveAction(
 export async function deleteKiadasAction(esemenyId: string, kiadasId: string) {
   await runKiegeszitoChange(esemenyId, (felhasznaloId) =>
     deleteKiadas(felhasznaloId, esemenyId, kiadasId),
+  );
+}
+
+export async function confirmKiadasokAction(esemenyId: string) {
+  await runKiegeszitoChange(esemenyId, (felhasznaloId) =>
+    confirmKiadasok(felhasznaloId, esemenyId),
+  );
+}
+
+export async function unconfirmKiadasokAction(esemenyId: string) {
+  await runKiegeszitoChange(esemenyId, (felhasznaloId) =>
+    unconfirmKiadasok(felhasznaloId, esemenyId),
+  );
+}
+
+export async function closeElszamolasAction(esemenyId: string) {
+  await runKiegeszitoChange(esemenyId, (felhasznaloId) =>
+    closeElszamolas(felhasznaloId, esemenyId),
+  );
+}
+
+export async function reopenElszamolasAction(esemenyId: string) {
+  await runKiegeszitoChange(esemenyId, (felhasznaloId) =>
+    reopenElszamolas(felhasznaloId, esemenyId),
+  );
+}
+
+export async function setUtalasMegvoltAction(
+  esemenyId: string,
+  utalasId: string,
+  megvolt: boolean,
+) {
+  await runKiegeszitoChange(esemenyId, (felhasznaloId) =>
+    setUtalasMegvolt(felhasznaloId, esemenyId, utalasId, megvolt),
   );
 }

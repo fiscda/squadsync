@@ -2,6 +2,7 @@
 
 import {
   type AutoInput,
+  addUzemanyag,
   claimUles,
   deleteAuto,
   moveUtas,
@@ -76,5 +77,24 @@ export async function moveUtasAction(
 export async function setSajatUtonAction(esemenyId: string, on: boolean) {
   await runKiegeszitoChange(esemenyId, (felhasznaloId) =>
     setSajatUton(felhasznaloId, esemenyId, on),
+  );
+}
+
+/** The fuel form of an Autó: the fuel Kiadás appears in Költségek. */
+export async function addUzemanyagAction(
+  esemenyId: string,
+  autoId: string,
+  formData: FormData,
+) {
+  const amount = Number(String(formData.get("amount") ?? "").trim());
+  const input = {
+    // Go checks the range; NaN would be sent as null.
+    amount: Number.isInteger(amount) ? amount : -1,
+    description: String(formData.get("description") ?? "").trim(),
+    payerId: String(formData.get("payerId") ?? ""),
+    mindenki: formData.get("split") === "mindenki",
+  };
+  await runKiegeszitoChange(esemenyId, (felhasznaloId) =>
+    addUzemanyag(felhasznaloId, esemenyId, autoId, input),
   );
 }
