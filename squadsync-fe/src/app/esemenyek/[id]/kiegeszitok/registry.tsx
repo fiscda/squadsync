@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { KiegeszitoKind } from "@/lib/backend";
 import { FelszerelesPanel } from "./felszereles/panel";
+import { KoltsegekPanel } from "./koltsegek/panel";
 import type { KiegeszitoPanelProps } from "./panel-props";
 
 /**
@@ -24,7 +25,21 @@ export const kiegeszitoRegistry: Record<
     hibak?: Record<string, string>;
   }
 > = {
-  koltsegek: { label: "Költségek", icon: "🧾", Panel: null },
+  koltsegek: {
+    label: "Költségek",
+    icon: "🧾",
+    Panel: KoltsegekPanel,
+    hibak: {
+      koltsegek_closed:
+        "Kiadást csak véglegesített vagy lezajlott eseménynél lehet rögzíteni vagy módosítani.",
+      koltsegek_locked:
+        "Az elszámolás már elkészült, ezért a kiadások le vannak zárva.",
+      koltsegek_not_resztvevo:
+        "A fizető és a megosztás új tagjai csak a mostani résztvevők közül lehetnek.",
+      koltsegek_split_sum:
+        "Az egyedi összegeknek pontosan ki kell adniuk a kiadás teljes összegét.",
+    },
+  },
   autok: { label: "Autók", icon: "🚗", Panel: null },
   szallas: { label: "Szállás", icon: "🛏", Panel: null },
   felszereles: {
@@ -52,9 +67,9 @@ export function isKiegeszitoKind(value: unknown): value is KiegeszitoKind {
 const frameworkHibak: Record<string, string> = {
   kiegeszito_off: "Ez a kiegészítő közben ki lett kapcsolva.",
   kiegeszito_locked:
-    "Elmaradt vagy lezajlott eseménynél már nem lehet kiegészítőt be- vagy kikapcsolni.",
+    "Ebben az állapotban ezt a kiegészítőt már nem lehet be- vagy kikapcsolni.",
   kiegeszito_in_use:
-    "Ezt a kiegészítőt most nem lehet kikapcsolni, mert használatban van.",
+    "Ezt a kiegészítőt most nem lehet kikapcsolni, mert használatban van (a Költségeket például addig, amíg van benne kiadás).",
   setup_closed: "Elmaradt vagy lezajlott eseménynél már nem lehet módosítani.",
   claiming_closed:
     "Vállalni csak véglegesített eseménynél lehet. Újranyitott egyeztetés alatt a vállalások be vannak fagyasztva.",
