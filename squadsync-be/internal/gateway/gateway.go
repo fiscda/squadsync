@@ -301,18 +301,58 @@ type DiscordOAuth interface {
 // CalendarEvent is one event in a Felhasznalo's dedicated "Squad Sync"
 // Google calendar (ADR-0005).
 type CalendarEvent struct {
-	// Key identifies the event on our side, so it can be updated or removed.
-	Key   string
-	Title string
-	Start time.Time
-	End   time.Time
+	// ID is the Google event id, chosen by us (base32hex, 5 to 1024
+	// characters), so writing the same event again never makes a duplicate.
+	ID          string
+	Title       string
+	Description string
+	// Location is free text ("" for none).
+	Location string
+	// Start and End bound the event. For an AllDay event they are Budapest
+	// midnights: of the first day, and after the last day.
+	Start  time.Time
+	End    time.Time
+	AllDay bool
+	// Link is the Esemeny's web page.
+	Link string
 }
 
-// GoogleCalendar writes to Felhasznalok's dedicated Google calendars.
+// Errors of GoogleCalendar.
+var (
+	// ErrGoogleCodeRejected means Google refused an OAuth authorization
+	// code: invalid, expired, already used, or for another redirect URI.
+	ErrGoogleCodeRejected = errors.New("gateway: google rejected the authorization code")
+	// ErrGoogleTokenRevoked means Google refused the refresh token
+	// (invalid_grant): the Felhasznalo revoked access, or it expired. Only
+	// connecting again helps.
+	ErrGoogleTokenRevoked = errors.New("gateway: google refused the refresh token")
+	// ErrGoogleCalendarGone means the calendar no longer exists (or the
+	// token's account can't see it).
+	ErrGoogleCalendarGone = errors.New("gateway: the google calendar no longer exists")
+)
+
+// GoogleCalendar writes to Felhasznalok's dedicated Google calendars, with
+// the calendar.app.created scope only: it never sees their other calendars.
 type GoogleCalendar interface {
-	// UpsertEvent creates or updates an event in the Felhasznalo's calendar.
-	UpsertEvent(ctx context.Context, felhasznaloID string, event CalendarEvent) error
+	// ExchangeCalendarCode exchanges an OAuth authorization code for a
+	// refresh token. redirectURI must be the one the authorization was
+	// started with. It fails with ErrGoogleCodeRejected when Google refuses
+	// the code.
+	ExchangeCalendarCode(ctx context.Context, code, redirectURI string) (refreshToken string, err error)
+	// CreateCalendar creates a secondary calendar and returns its id.
+	CreateCalendar(ctx context.Context, refreshToken, name, timeZone string) (calendarID string, err error)
+	// UpsertEvent creates the event, or replaces it (restoring it if it was
+	// deleted). It fails with ErrGoogleCalendarGone when the calendar is
+	// gone.
+	UpsertEvent(ctx context.Context, refreshToken, calendarID string, event CalendarEvent) error
+	// DeleteEvent deletes the event; one that is already gone is no error.
+	DeleteEvent(ctx context.Context, refreshToken, calendarID, eventID string) error
+	// RevokeCalendarToken revokes the refresh token at Google.
+	RevokeCalendarToken(ctx context.Context, refreshToken string) error
 }
+
+// Every GoogleCalendar call but ExchangeCalendarCode fails with
+// ErrGoogleTokenRevoked when Google refuses the refresh token.
 
 // Playlist is a Spotify playlist on the owner account (ADR-0006).
 type Playlist struct {
@@ -408,8 +448,28 @@ func (Disabled) SendSzallasDM(context.Context, string, SzallasDM) error {
 	return ErrNotConfigured
 }
 
+// ExchangeCalendarCode implements GoogleCalendar.
+func (Disabled) ExchangeCalendarCode(context.Context, string, string) (string, error) {
+	return "", ErrNotConfigured
+}
+
+// CreateCalendar implements GoogleCalendar.
+func (Disabled) CreateCalendar(context.Context, string, string, string) (string, error) {
+	return "", ErrNotConfigured
+}
+
 // UpsertEvent implements GoogleCalendar.
-func (Disabled) UpsertEvent(context.Context, string, CalendarEvent) error {
+func (Disabled) UpsertEvent(context.Context, string, string, CalendarEvent) error {
+	return ErrNotConfigured
+}
+
+// DeleteEvent implements GoogleCalendar.
+func (Disabled) DeleteEvent(context.Context, string, string, string) error {
+	return ErrNotConfigured
+}
+
+// RevokeCalendarToken implements GoogleCalendar.
+func (Disabled) RevokeCalendarToken(context.Context, string) error {
 	return ErrNotConfigured
 }
 

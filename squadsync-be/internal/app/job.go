@@ -93,9 +93,12 @@ func (a *App) jobHandlers() map[jobKind]jobHandler {
 }
 
 // durableJobHandlers is the one place durable-mode job kinds are
-// registered. #23 adds the Spotify playlist here.
+// registered. #23 adds the Spotify playlist here; gcal_sync is the Google
+// Calendar sync (google_naptar.go).
 func (a *App) durableJobHandlers() map[jobKind]durableJobHandler {
-	handlers := map[jobKind]durableJobHandler{}
+	handlers := map[jobKind]durableJobHandler{
+		jobGcalSync: a.runGcalSync,
+	}
 	for k, h := range a.testDurableJobs {
 		handlers[k] = h
 	}

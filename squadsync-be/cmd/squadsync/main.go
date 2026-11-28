@@ -18,6 +18,9 @@
 //	                     with the bot)
 //	DISCORD_CLIENT_ID    the Discord application's OAuth2 client id, for linking
 //	DISCORD_CLIENT_SECRET  and its secret; without both, linking is unavailable
+//	GOOGLE_CLIENT_ID     the Google OAuth client id, for Google Calendar sync
+//	GOOGLE_CLIENT_SECRET   and its secret; without both (or BETTER_AUTH_URL),
+//	                     connecting Google Calendar is unavailable
 package main
 
 import (
@@ -68,6 +71,9 @@ type config struct {
 
 	discordClientID     string
 	discordClientSecret string
+
+	googleClientID     string
+	googleClientSecret string
 }
 
 func main() {
@@ -127,11 +133,21 @@ func run(log *slog.Logger, args []string) error {
 		log.Info("DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET or BETTER_AUTH_URL is not set: linking Discord accounts is unavailable")
 	}
 
+	var calendar gateway.GoogleCalendar = gateway.Disabled{}
+	if cfg.googleClientID != "" && cfg.googleClientSecret != "" && cfg.publicURL != "" {
+		calendar = &gateway.GoogleCalendarClient{
+			ClientID:     cfg.googleClientID,
+			ClientSecret: cfg.googleClientSecret,
+		}
+	} else {
+		log.Info("GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET or BETTER_AUTH_URL is not set: Google Calendar sync is unavailable")
+	}
+
 	a := app.New(app.Deps{
 		Store:    s,
 		Clock:    clock.System{},
 		Discord:  discord,
-		Calendar: gateway.Disabled{},
+		Calendar: calendar,
 		Spotify:  gateway.Disabled{},
 
 		DiscordOAuth: discordOAuth,
@@ -237,6 +253,9 @@ func loadConfig(migrateOnly bool) (config, error) {
 
 		discordClientID:     strings.TrimSpace(os.Getenv("DISCORD_CLIENT_ID")),
 		discordClientSecret: strings.TrimSpace(os.Getenv("DISCORD_CLIENT_SECRET")),
+
+		googleClientID:     strings.TrimSpace(os.Getenv("GOOGLE_CLIENT_ID")),
+		googleClientSecret: strings.TrimSpace(os.Getenv("GOOGLE_CLIENT_SECRET")),
 	}
 	if cfg.dbPath == "" {
 		return config{}, errors.New("DATABASE_PATH is required")

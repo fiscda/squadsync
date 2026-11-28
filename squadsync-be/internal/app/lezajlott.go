@@ -57,6 +57,11 @@ func (a *App) runLezajlott(ctx context.Context, q store.Queries, j store.Job) (f
 	if err := q.UpdateEsemenyAllapot(ctx, e.ID, domain.Lezajlott, p.IdopontID); err != nil {
 		return nil, err
 	}
+	// The calendar events stay (Lezajlott keeps its Resztvevok); this only
+	// reconciles them.
+	if err := a.syncNaptarOfEsemeny(ctx, q, e.ID); err != nil {
+		return nil, err
+	}
 	// The Elszamolas reminder, 3 days after j.RunAt: when the Esemeny
 	// really ended, even if this job ran late.
 	if err := a.scheduleElszamolasEmlekezteto(ctx, q, e.ID, j.RunAt); err != nil {

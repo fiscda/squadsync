@@ -46,6 +46,24 @@ In a channel of that server, an Admin of a Csoport runs `/csatorna` and picks th
 
 Any Tag runs `/esemeny`, picks a Csoport and fills in the modal to propose an Esemény. Each line of its Időpontok field is `12.05 20:00`, `12.05 20:00-23:00`, `12.05-12.07` or `12.05 18:00-12.07 14:00` (month.day, Budapest time, up to 5 lines).
 
+### 1c. Create a Google OAuth client for Calendar sync (optional)
+
+Without `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, Google Calendar sync is off and `/fiok` says it isn't set up. Login never uses Google. See ADR-0005 for why the app is published but not verified.
+
+1. Open the [Google Cloud Console](https://console.cloud.google.com/), click the project picker at the top, then **New Project**. Name it (for example "Squad Sync") and click **Create**, then select it.
+2. **APIs & Services** → **Library**: search for **Google Calendar API**, open it and click **Enable**.
+3. **APIs & Services** → **OAuth consent screen** (in newer consoles: **Google Auth Platform** → **Branding** / **Audience** / **Data Access**):
+   - Click **Get started** (or **Configure consent screen**). Fill in the app name ("Squad Sync"), a support email and a developer contact email.
+   - **Audience** (User type): **External**.
+   - **Data Access** (Scopes): **Add or remove scopes**, filter for `calendar.app.created`, tick `https://www.googleapis.com/auth/calendar.app.created` ("Make secondary Google calendars, and see, create, change, and delete events on them") and click **Update**, then **Save**. Add no other scopes.
+   - **Audience** → **Publishing status**: click **Publish app** and confirm, so the status is **In production**. Don't submit it for verification. In Testing mode, refresh tokens expire after 7 days.
+4. **APIs & Services** → **Credentials** (or **Google Auth Platform** → **Clients**) → **Create credentials** → **OAuth client ID**:
+   - Application type: **Web application**.
+   - **Authorized redirect URIs**: add `http://localhost:3000/fiok/google/callback` (in production, `<BETTER_AUTH_URL>/fiok/google/callback`). No JavaScript origins are needed.
+   - Click **Create** and copy the **Client ID** into `GOOGLE_CLIENT_ID` and the **Client secret** into `GOOGLE_CLIENT_SECRET`.
+
+When connecting, everyone sees Google's "Google hasn't verified this app" warning once: click **Advanced** → **Go to Squad Sync (unsafe)**. The unverified app allows 100 users over its lifetime.
+
 ### 2. Configure the environment
 
 ```sh
@@ -63,6 +81,7 @@ Fill in `.env`:
 | `BETTER_AUTH_URL` | `http://localhost:3000` |
 | `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` | The values from step 1. Go uses them too, to exchange the code when a Felhasználó links a further Discord account. |
 | `DISCORD_BOT_TOKEN`, `DISCORD_DEV_GUILD_ID` | Optional: the values from step 1b. |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Optional: the values from step 1c. Next.js builds Google's consent URL with the id; Go exchanges the code and calls the Calendar API with both. |
 
 The Makefile exports everything in `.env` to both servers, so there's no separate `.env` inside `squadsync-fe/` or `squadsync-be/`.
 
@@ -117,6 +136,11 @@ make lint   # cd squadsync-fe && bun run lint && bunx tsc --noEmit
    - Extra accounts can be unlinked on `/fiok`; the main one can't.
 5. **Web login with a linked account is refused.** Better Auth's `user.validateUserInfo` (`squadsync-fe/src/lib/web-login-guard.ts`) asks Go's secret-only `GET /discord-account/{discordId}/web-login`. It runs before Better Auth creates a user and before it creates the session of an existing one, so a linked account gets neither. The refusal ("Ez a fiók X-hez van kapcsolva, lépj be azzal.") is shown on the home page. The redirect URL carries only the Discord id signed with `BETTER_AUTH_SECRET`; the home page verifies it and asks Go for the message again, so no text from the URL is ever shown.
 6. **DMs** to a Felhasználó go to every linked Discord account, on purpose (ADR-0002). Every DM goes through `squadsync-be/internal/app/dm.go`, which fans out to all of them.
+7. **Google Calendar** (ADR-0005), on `/fiok`:
+   - "Google Naptár összekapcsolása" posts to `/fiok/google/kapcsolas`, which stores a `state` cookie bound to the Felhasználó and sends the browser to Google (scope `calendar.app.created` only, `access_type=offline`, `prompt=consent`).
+   - Google redirects to `/fiok/google/callback`. The route checks the state and forwards the code to `POST /felhasznalo/google-naptar`. Go exchanges it with the redirect URI it builds from its own `BETTER_AUTH_URL`, stores the refresh token in its `google_naptar` table, and schedules a sync of every Esemény the Felhasználó is a Résztvevő of. Without the Google credentials Go answers 503.
+   - Syncing is a durable `gcal_sync` job per (Felhasználó, Esemény) (`squadsync-be/internal/app/google_naptar.go`). The first one creates the "Squad Sync" calendar. An event exists while the Esemény is Véglegesítve or Lezajlott and the Felhasználó is a Résztvevő. If Google refuses the token, `/fiok` says to connect again.
+   - Disconnecting (`DELETE /felhasznalo/google-naptar`) forgets the token and revokes it. The calendar stays in the Google account.
 
 ## Go backend layout
 
