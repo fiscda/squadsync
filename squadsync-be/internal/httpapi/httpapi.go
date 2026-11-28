@@ -45,6 +45,7 @@ func New(a *app.App, secret string, log *slog.Logger) http.Handler {
 	s.registerFelszereles(mux)
 	s.registerKoltsegek(mux)
 	s.registerAutok(mux)
+	s.registerSzallas(mux)
 	s.registerRaeres(mux)
 	s.registerIdozites(mux)
 
