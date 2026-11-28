@@ -101,9 +101,18 @@ func (a *App) runHatarido(ctx context.Context, q store.Queries, j store.Job) (fu
 	if current == nil || !current.Equal(p.At) {
 		return nil, nil
 	}
-	d, err := esemenyDetail(ctx, q, e, "")
+	dm, err := a.hataridoDM(ctx, q, e)
 	if err != nil {
 		return nil, err
+	}
+	return func(ctx context.Context) { a.sendHataridoDM(ctx, e.CsoportID, e.SzervezoID, dm) }, nil
+}
+
+// hataridoDM builds the Hatarido DM for the Esemeny as it stands now.
+func (a *App) hataridoDM(ctx context.Context, q store.Queries, e domain.Esemeny) (gateway.HataridoDM, error) {
+	d, err := esemenyDetail(ctx, q, e, "")
+	if err != nil {
+		return gateway.HataridoDM{}, err
 	}
 	now := a.clock.Now()
 	lines := make([]gateway.IdopontLine, len(d.Idopontok))
@@ -119,15 +128,40 @@ func (a *App) runHatarido(ctx context.Context, q store.Queries, j store.Job) (fu
 	}
 	// Best Helyezes first, unranked last; ties stay chronological.
 	slices.SortStableFunc(lines, func(x, y gateway.IdopontLine) int { return rank(x.Helyezes) - rank(y.Helyezes) })
-	dm := gateway.HataridoDM{
+	return gateway.HataridoDM{
 		EsemenyID:      e.ID,
 		CsoportName:    d.CsoportName,
 		Title:          e.Title,
 		Idopontok:      lines,
 		ConfirmButtons: len(lines) <= gateway.MaxAnswerRows,
 		Link:           a.esemenyURL(e.ID),
+	}, nil
+}
+
+// hataridoSent tells whether the Hatarido DM of the Esemeny's current
+// Hatarido already went out: it is set, its job is done, and the Esemeny is
+// in Egyeztetes. A handover then re-sends it to the new Szervezo, who
+// otherwise would never learn that the deadline passed. A Hatarido whose job
+// is still pending needs nothing: the job will read the new Szervezo.
+func hataridoSent(ctx context.Context, q store.Queries, e domain.Esemeny) (bool, error) {
+	if e.Allapot != domain.Egyeztetes {
+		return false, nil
 	}
-	return func(ctx context.Context) { a.sendHataridoDM(ctx, e.CsoportID, e.SzervezoID, dm) }, nil
+	current, err := q.FindHatarido(ctx, e.ID)
+	if err != nil || current == nil {
+		return false, err
+	}
+	jobs, err := q.ListDoneJobs(ctx, e.ID, string(jobHatarido))
+	if err != nil {
+		return false, err
+	}
+	for _, j := range jobs {
+		var p hataridoPayload
+		if err := jobPayload(j, &p); err == nil && p.At.Equal(*current) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // rank orders Helyezesek with "none" (0) after every place.

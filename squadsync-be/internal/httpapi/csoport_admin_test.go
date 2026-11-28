@@ -87,7 +87,7 @@ func TestRemoveTagAndLeaveRoutes(t *testing.T) {
 	expectStatus(t, call(t, api, http.MethodDelete, cecil, "", as("bela")), http.StatusForbidden)
 	expectStatus(t, call(t, api, http.MethodDelete, "/csoport/"+id+"/tag/nincs", "", as("anna")), http.StatusNotFound)
 
-	// The Szervezo of an active Esemeny can be neither removed nor leave.
+	// The Szervezo of an active Esemeny can't leave.
 	err := h.Store.InsertEsemeny(context.Background(), domain.Esemeny{
 		ID: "e1", CsoportID: id, Title: "Játék", SzervezoID: "cecil", Allapot: domain.Egyeztetes, CreatedAt: apptest.Start,
 	})
@@ -99,13 +99,6 @@ func TestRemoveTagAndLeaveRoutes(t *testing.T) {
 	if e := decode[errorResp](t, rec); e.Code != "szervezo_of_active_esemeny" {
 		t.Fatalf("error = %+v, want code szervezo_of_active_esemeny", e)
 	}
-	// Nobody answered the Esemeny, so an Admin has nobody to hand it to.
-	rec = call(t, api, http.MethodDelete, cecil, "", as("anna"))
-	expectStatus(t, rec, http.StatusConflict)
-	if e := decode[errorResp](t, rec); e.Code != "no_eligible_szervezo" {
-		t.Fatalf("error = %+v, want code no_eligible_szervezo", e)
-	}
-
 	// The last Admin can't leave while others remain.
 	rec = call(t, api, http.MethodPost, "/csoport/"+id+"/kilepes", "", as("anna"))
 	expectStatus(t, rec, http.StatusConflict)

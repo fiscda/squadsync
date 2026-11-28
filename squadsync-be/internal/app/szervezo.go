@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"errors"
-	"fmt"
 	"slices"
 
 	"squadsync-be/internal/domain"
@@ -18,9 +17,11 @@ import (
 //
 // Handing over is also how a Szervezo leaves, or is removed by an Admin:
 // a Tag who is the Szervezo of an active Esemeny can't go (see deleteTag)
-// until each of them has a new Szervezo. If nobody qualifies for one, the
-// Szervezo cancels it instead; an Admin can't, because Admins have no
-// authority over any Esemeny, so that removal is refused.
+// until each of them has a new Szervezo. If nobody qualifies for one, a
+// Szervezo who leaves cancels it themself. When an Admin removes them, the
+// removal cancels it (Elmaradt) in the same transaction: nobody else
+// answered it, so nobody is left to organise, and the Admin still gets no
+// other authority over an Esemeny.
 //
 // Everything that is addressed to "the Szervezo" (the drop-out and Hatarido
 // DMs, the confirm buttons, the Kiegeszitok's powers) reads
@@ -32,10 +33,6 @@ import (
 // or they already are its Szervezo.
 var ErrNotEligibleSzervezo = errors.New("not eligible to be the szervezo of the esemeny")
 
-// ErrNoEligibleSzervezo means an Esemeny has nobody to be handed to, which
-// refuses removing its Szervezo. It is returned as a *NoEligibleSzervezoError.
-var ErrNoEligibleSzervezo = errors.New("esemeny has no tag to hand the szervezo role to")
-
 // EsemenyRef names an Esemeny in an error or a list.
 type EsemenyRef struct {
 	ID      string
@@ -46,16 +43,6 @@ type EsemenyRef struct {
 func refOf(e domain.Esemeny) EsemenyRef {
 	return EsemenyRef{ID: e.ID, Title: e.Title, Allapot: e.Allapot}
 }
-
-// NoEligibleSzervezoError is the Esemeny with nobody to hand it to. It
-// matches ErrNoEligibleSzervezo.
-type NoEligibleSzervezoError struct{ Esemeny EsemenyRef }
-
-func (e *NoEligibleSzervezoError) Error() string {
-	return fmt.Sprintf("%v: %s", ErrNoEligibleSzervezo, e.Esemeny.Title)
-}
-
-func (e *NoEligibleSzervezoError) Unwrap() error { return ErrNoEligibleSzervezo }
 
 // SzervezoOfActiveEsemenyError lists the active Esemenyek that keep a Tag
 // from leaving or being removed. It matches ErrSzervezoOfActiveEsemeny.
@@ -71,7 +58,8 @@ type SzervezoEsemeny struct {
 	EsemenyRef
 	// Utodok are the eligible Tags, ordered by name: those with a
 	// Visszajelzes on the Esemeny, other than the Szervezo. Empty means
-	// only cancelling the Esemeny gets its Szervezo free.
+	// that only cancelling the Esemeny frees its Szervezo: they do it
+	// themself to leave, and removing them cancels it.
 	Utodok []domain.TagWithName
 }
 
@@ -151,6 +139,9 @@ func eligibleSzervezok(ctx context.Context, q store.Queries, e domain.Esemeny) (
 type handover struct {
 	esemenyID, csoportID, newSzervezoID string
 	dm                                  gateway.SzervezoDM
+	// hatarido is set when the Esemeny's Hatarido DM had gone out already:
+	// the new Szervezo gets it too, with its confirm buttons.
+	hatarido *gateway.HataridoDM
 }
 
 // handOver makes newSzervezoID the Szervezo of the Esemeny, in the caller's
@@ -170,54 +161,82 @@ func (a *App) handOver(ctx context.Context, q store.Queries, e domain.Esemeny, n
 	if err != nil {
 		return handover{}, err
 	}
-	return handover{
+	h := handover{
 		esemenyID: e.ID, csoportID: e.CsoportID, newSzervezoID: newSzervezoID,
 		dm: gateway.SzervezoDM{CsoportName: csoport.Name, Title: e.Title, Link: a.esemenyURL(e.ID)},
-	}, nil
+	}
+	sent, err := hataridoSent(ctx, q, e)
+	if err != nil {
+		return handover{}, err
+	}
+	if sent {
+		dm, err := a.hataridoDM(ctx, q, e)
+		if err != nil {
+			return handover{}, err
+		}
+		h.hatarido = &dm
+	}
+	return h, nil
 }
 
-// handOverAllOf hands every active Esemeny the target is the Szervezo of to
-// the Tag picked for it in szervezok (Esemeny id to Felhasznalo id), in the
-// caller's transaction. It is all or nothing:
+// reassignment is what removing a Szervezo did to their active Esemenyek.
+type reassignment struct {
+	handovers []handover
+	// cancelled are the Esemenyek nobody could take, with the announcement of
+	// each one's cancellation.
+	cancelled []cancellation
+}
+
+type cancellation struct {
+	esemenyID string
+	ann       gateway.Announcement
+}
+
+// reassignAllOf takes every active Esemeny the target is the Szervezo of
+// away from them, in the caller's transaction, all or nothing:
 //
-//   - An Esemeny nobody can take gives *NoEligibleSzervezoError, checked
-//     first, so the Admin learns what only the Szervezo can fix.
-//   - Esemenyek without a pick give *SzervezoOfActiveEsemenyError naming
-//     them, as if nothing had been picked.
-//   - A pick that isn't eligible gives ErrNotEligibleSzervezo.
+//   - An Esemeny nobody else answered (no eligible Tag) is cancelled, since
+//     it has nobody to hand it to.
+//   - Every other one is handed to the Tag picked for it in szervezok
+//     (Esemeny id to Felhasznalo id). Esemenyek without a pick give
+//     *SzervezoOfActiveEsemenyError naming them, and a pick that isn't
+//     eligible gives ErrNotEligibleSzervezo.
 //
-// Picks for Esemenyek that aren't the target's active ones are ignored: the
-// picker may be stale, and they change nothing.
-func (a *App) handOverAllOf(ctx context.Context, q store.Queries, csoportID, targetID string, szervezok map[string]string) ([]handover, error) {
+// Picks for Esemenyek that aren't the target's active ones, or that get
+// cancelled, are ignored: the picker may be stale, and they change nothing.
+func (a *App) reassignAllOf(ctx context.Context, q store.Queries, csoportID, targetID string, szervezok map[string]string) (reassignment, error) {
 	esemenyek, err := q.ListActiveEsemenyekOfSzervezo(ctx, csoportID, targetID)
 	if err != nil {
-		return nil, err
+		return reassignment{}, err
 	}
 	eligible := make([][]domain.TagWithName, len(esemenyek))
+	var missing []EsemenyRef
 	for n, e := range esemenyek {
 		if eligible[n], err = eligibleSzervezok(ctx, q, e); err != nil {
-			return nil, err
+			return reassignment{}, err
 		}
-		if len(eligible[n]) == 0 {
-			return nil, &NoEligibleSzervezoError{Esemeny: refOf(e)}
-		}
-	}
-	var missing []EsemenyRef
-	for _, e := range esemenyek {
-		if szervezok[e.ID] == "" {
+		if len(eligible[n]) > 0 && szervezok[e.ID] == "" {
 			missing = append(missing, refOf(e))
 		}
 	}
 	if len(missing) > 0 {
-		return nil, &SzervezoOfActiveEsemenyError{Esemenyek: missing}
+		return reassignment{}, &SzervezoOfActiveEsemenyError{Esemenyek: missing}
 	}
-	done := make([]handover, 0, len(esemenyek))
+	var done reassignment
 	for n, e := range esemenyek {
+		if len(eligible[n]) == 0 {
+			ann, err := a.cancelInTx(ctx, q, e)
+			if err != nil {
+				return reassignment{}, err
+			}
+			done.cancelled = append(done.cancelled, cancellation{esemenyID: e.ID, ann: ann})
+			continue
+		}
 		h, err := a.handOver(ctx, q, e, szervezok[e.ID], eligible[n])
 		if err != nil {
-			return nil, err
+			return reassignment{}, err
 		}
-		done = append(done, h)
+		done.handovers = append(done.handovers, h)
 	}
 	return done, nil
 }
@@ -232,6 +251,23 @@ func (a *App) afterHandovers(done []handover) {
 		for _, h := range done {
 			a.refreshEsemenyMessages(ctx, h.esemenyID)
 			a.sendSzervezoDM(ctx, h.csoportID, h.newSzervezoID, h.dm)
+			if h.hatarido != nil {
+				a.sendHataridoDM(ctx, h.csoportID, h.newSzervezoID, *h.hatarido)
+			}
+		}
+	})
+}
+
+// afterCancellations, once the change commits, announces each cancelled
+// Esemeny as if its Szervezo had cancelled it. actorID, the Admin who
+// removed them, is spared the DM.
+func (a *App) afterCancellations(actorID string, cancelled []cancellation) {
+	if len(cancelled) == 0 {
+		return
+	}
+	a.afterCommit(func(ctx context.Context) {
+		for _, c := range cancelled {
+			a.announceAllapot(ctx, c.esemenyID, actorID, c.ann)
 		}
 	})
 }

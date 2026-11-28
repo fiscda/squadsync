@@ -297,7 +297,7 @@ func TestALeavingTagKeepsTheirVisszajelzesButItNoLongerCounts(t *testing.T) {
 	}
 }
 
-func TestASzervezoOfAnActiveEsemenyCantLeaveOrBeRemovedWithoutAHandover(t *testing.T) {
+func TestASzervezoOfAnActiveEsemenyCantLeaveWithoutAHandover(t *testing.T) {
 	for _, allapot := range []domain.Allapot{domain.Egyeztetes, domain.Veglegesitve} {
 		t.Run(string(allapot), func(t *testing.T) {
 			h := apptest.New(t)
@@ -307,10 +307,6 @@ func TestASzervezoOfAnActiveEsemenyCantLeaveOrBeRemovedWithoutAHandover(t *testi
 
 			if err := h.App.LeaveCsoport(ctx, "bela", c.ID); !errors.Is(err, app.ErrSzervezoOfActiveEsemeny) {
 				t.Fatalf("leaving: err = %v, want ErrSzervezoOfActiveEsemeny", err)
-			}
-			// Nobody answered it, so there is nobody to hand it to either.
-			if err := h.App.RemoveTag(ctx, "anna", c.ID, "bela", nil); !errors.Is(err, app.ErrNoEligibleSzervezo) {
-				t.Fatalf("removing: err = %v, want ErrNoEligibleSzervezo", err)
 			}
 			if !isTag(t, h, "bela", c.ID) {
 				t.Fatal("Bela lost their Tag despite the refusal")

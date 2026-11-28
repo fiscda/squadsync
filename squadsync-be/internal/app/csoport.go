@@ -151,20 +151,21 @@ func (a *App) SetAdmin(ctx context.Context, felhasznaloID, csoportID, targetID s
 // Tag.
 //
 // A target who is the Szervezo of active Esemenyek needs a new Szervezo for
-// each, named in szervezok (Esemeny id to the new Szervezo's Felhasznalo
-// id); see handOverAllOf for the errors. The handovers, the release of the
+// each that somebody else answered, named in szervezok (Esemeny id to the
+// new Szervezo's Felhasznalo id); see reassignAllOf for the errors. An
+// Esemeny nobody else answered is cancelled instead, since an Admin has no
+// other say over it. The handovers, the cancellations, the release of the
 // target's claims and the removal are one transaction: when any part is
-// refused, nothing changes. Without Esemenyek to hand over, szervezok may be
-// nil.
+// refused, nothing changes. Without active Esemenyek, szervezok may be nil.
 func (a *App) RemoveTag(ctx context.Context, felhasznaloID, csoportID, targetID string, szervezok map[string]string) error {
 	var left tagLeft
-	var handovers []handover
+	var reassigned reassignment
 	err := a.store.InTx(ctx, func(q store.Queries) error {
 		if err := requireAdmin(ctx, q, csoportID, felhasznaloID); err != nil {
 			return err
 		}
 		var err error
-		if handovers, err = a.handOverAllOf(ctx, q, csoportID, targetID, szervezok); err != nil {
+		if reassigned, err = a.reassignAllOf(ctx, q, csoportID, targetID, szervezok); err != nil {
 			return err
 		}
 		left, err = a.deleteTag(ctx, q, csoportID, targetID)
@@ -173,7 +174,8 @@ func (a *App) RemoveTag(ctx context.Context, felhasznaloID, csoportID, targetID 
 	if err != nil {
 		return err
 	}
-	a.afterHandovers(handovers)
+	a.afterHandovers(reassigned.handovers)
+	a.afterCancellations(felhasznaloID, reassigned.cancelled)
 	a.afterTagLeft(left)
 	return nil
 }

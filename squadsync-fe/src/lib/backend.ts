@@ -420,33 +420,12 @@ export function listSzervezoEsemenyek(
 }
 
 /**
- * What Go says about a refused handover, removal or leave (the 409 bodies):
- * "szervezo_of_active_esemeny" lists the Események in `esemenyek`, and
- * "no_eligible_szervezo" names the one nobody can take in `esemeny`.
- */
-export function szervezoRefusal(err: BackendError): {
-  esemenyek: EsemenyRef[];
-  esemeny: EsemenyRef | null;
-} {
-  try {
-    const body = JSON.parse(err.body) as {
-      esemenyek?: EsemenyRef[];
-      esemeny?: EsemenyRef;
-    };
-    return { esemenyek: body.esemenyek ?? [], esemeny: body.esemeny ?? null };
-  } catch {
-    return { esemenyek: [], esemeny: null };
-  }
-}
-
-/**
  * Removes a Tag. Admins only (403). If the Tag is the Szervező of active
  * Események, `szervezok` must name a new Szervező (a Felhasználó id) for each
- * Esemény id, or Go answers 409 with code:
- * - "szervezo_of_active_esemeny": some Esemény has no pick (see
- *   szervezoRefusal for which),
+ * Esemény id that someone else answered; the ones nobody else answered (no
+ * `utodok`) are cancelled by the removal. Otherwise Go answers 409 with code:
+ * - "szervezo_of_active_esemeny": an Esemény has no pick,
  * - "not_eligible_szervezo": a pick isn't a Tag with a Visszajelzés on it,
- * - "no_eligible_szervezo": some Esemény has nobody to take it,
  * - "last_admin".
  * Nothing changes when it is refused.
  */
@@ -464,10 +443,7 @@ export async function removeTag(
   );
 }
 
-/**
- * The caller leaves the Csoport. Go answers 409 like removeTag does; the
- * body of "szervezo_of_active_esemeny" lists the Események in the way.
- */
+/** The caller leaves the Csoport. Go answers 409 like removeTag does. */
 export async function leaveCsoport(
   felhasznaloId: string,
   csoportId: string,

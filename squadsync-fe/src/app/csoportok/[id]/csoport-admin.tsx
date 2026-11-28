@@ -67,8 +67,8 @@ export function RenameForm({
  *
  * A Tag who is the Szervező of active Események can only be removed once
  * each of them has a new Szervező, picked here from the Tags with a
- * Visszajelzés on it. An Admin can't cancel someone else's Esemény, so one
- * with nobody to take it blocks the removal.
+ * Visszajelzés on it. An Esemény nobody else answered has nobody to take it,
+ * so removing the Tag cancels it; the confirm says so.
  */
 export function TagControls({
   csoportId,
@@ -104,7 +104,6 @@ export function TagControls({
     }
     return result;
   }, {});
-  const stuck = szervezoEsemenyek.filter((e) => e.utodok.length === 0);
 
   return (
     <div className="flex flex-col gap-2">
@@ -143,7 +142,7 @@ export function TagControls({
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="submit"
-              disabled={removePending || stuck.length > 0}
+              disabled={removePending}
               className={`${dangerButtonClass} disabled:opacity-50`}
             >
               {szervezoEsemenyek.length > 0
@@ -177,49 +176,46 @@ function SzervezoPickers({
   return (
     <fieldset className="flex flex-col gap-3">
       <legend className="text-sm text-zinc-600 dark:text-zinc-400">
-        {tagName} az alábbi aktív események szervezője. Válassz mindegyikhez új
-        szervezőt azok közül, akik válaszoltak rá.
+        {tagName} az alábbi aktív események szervezője. Válassz új szervezőt
+        azok közül, akik válaszoltak rá. Amire senki más nem válaszolt, az
+        elmarad.
       </legend>
-      {szervezoEsemenyek.map((esemeny) => (
-        <div key={esemeny.id} className="flex flex-col gap-1">
-          <label htmlFor={`szervezo-${esemeny.id}`} className="text-sm">
-            <Link href={`/esemenyek/${esemeny.id}`} className={linkClass}>
-              {esemeny.title}
-            </Link>{" "}
-            <span className="text-zinc-500">
-              ({allapotText[esemeny.allapot]})
-            </span>
-          </label>
-          {esemeny.utodok.length === 0 ? (
-            <p
-              id={`szervezo-${esemeny.id}`}
-              role="alert"
-              className="text-sm text-red-600 dark:text-red-400"
-            >
-              Erre az eseményre senki más nem válaszolt, így nincs, akinek át
-              lehetne adni. Csak a szervezője mondhatja le, ezért addig{" "}
-              {tagName} nem távolítható el.
-            </p>
-          ) : (
-            <select
-              id={`szervezo-${esemeny.id}`}
-              name={esemeny.id}
-              required
-              defaultValue=""
-              className="rounded-full border border-zinc-300 bg-transparent px-4 py-2 text-sm dark:border-zinc-700"
-            >
-              <option value="" disabled>
-                Új szervező…
-              </option>
-              {esemeny.utodok.map((tag) => (
-                <option key={tag.felhasznaloId} value={tag.felhasznaloId}>
-                  {tag.name}
+      {szervezoEsemenyek.map((esemeny) => {
+        return (
+          <div key={esemeny.id} className="flex flex-col gap-1">
+            <div className="text-sm">
+              <Link href={`/esemenyek/${esemeny.id}`} className={linkClass}>
+                {esemeny.title}
+              </Link>{" "}
+              <span className="text-zinc-500">
+                ({allapotText[esemeny.allapot]})
+              </span>
+            </div>
+            {esemeny.utodok.length === 0 ? (
+              <p className="text-sm text-red-600 dark:text-red-400">
+                Ez az esemény elmarad, mert senki más nem válaszolt rá.
+              </p>
+            ) : (
+              <select
+                name={esemeny.id}
+                required
+                defaultValue=""
+                aria-label={`Új szervező: ${esemeny.title}`}
+                className="rounded-full border border-zinc-300 bg-transparent px-4 py-2 text-sm dark:border-zinc-700"
+              >
+                <option value="" disabled>
+                  Új szervező…
                 </option>
-              ))}
-            </select>
-          )}
-        </div>
-      ))}
+                {esemeny.utodok.map((tag) => (
+                  <option key={tag.felhasznaloId} value={tag.felhasznaloId}>
+                    {tag.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+        );
+      })}
     </fieldset>
   );
 }

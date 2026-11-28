@@ -13,7 +13,6 @@ import {
   setCsoportMuted,
   setEmlekeztetok,
   setTagAdmin,
-  szervezoRefusal,
   unlinkCsatorna,
 } from "@/lib/backend";
 import { requireFelhasznalo } from "@/lib/felhasznalo";
@@ -208,9 +207,10 @@ export async function setAdminAction(
 
 /**
  * Removes a Tag from the Csoport. Admins only. If the Tag is the Szervező of
- * active Események, `szervezok` names the new Szervező of each (Esemény id to
- * Felhasználó id); the removal and the handovers happen together or not at
- * all.
+ * active Események, `szervezok` names the new Szervező of each one that
+ * someone else answered (Esemény id to Felhasználó id); one nobody else
+ * answered is cancelled. The removal, the handovers and the cancellations
+ * happen together or not at all.
  */
 export async function removeTagAction(
   csoportId: string,
@@ -226,13 +226,6 @@ export async function removeTagAction(
       if (err.status === 409 && err.code === "szervezo_of_active_esemeny") {
         revalidatePath(`/csoportok/${csoportId}`);
         return { error: "Minden érintett eseményhez válassz új szervezőt." };
-      }
-      if (err.status === 409 && err.code === "no_eligible_szervezo") {
-        const { esemeny } = szervezoRefusal(err);
-        revalidatePath(`/csoportok/${csoportId}`);
-        return {
-          error: `A(z) „${esemeny?.title ?? "ismeretlen"}” eseménynek nincs, akinek át lehetne adni a szervezést, ezért a tag nem távolítható el. Csak a szervezője mondhatja le az eseményt.`,
-        };
       }
       if (err.status === 409 && err.code === "not_eligible_szervezo") {
         revalidatePath(`/csoportok/${csoportId}`);

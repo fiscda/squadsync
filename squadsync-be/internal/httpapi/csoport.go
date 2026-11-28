@@ -178,7 +178,7 @@ func (s *server) removeTag(w http.ResponseWriter, r *http.Request, felhasznaloID
 		// Szervezok maps an Esemeny id to the new Szervezo's Felhasznalo id.
 		Szervezok map[string]string `json:"szervezok"`
 	}
-	if r.ContentLength != 0 && !decodeJSON(w, r, &body) {
+	if !decodeOptionalJSON(w, r, &body) {
 		return
 	}
 	err := s.app.RemoveTag(r.Context(), felhasznaloID, r.PathValue("id"), r.PathValue("felhasznaloID"), body.Szervezok)
@@ -231,7 +231,6 @@ func (s *server) szervezoEsemenyek(w http.ResponseWriter, r *http.Request, felha
 // with a code the web tells apart. It reports whether err was one of them.
 func writeSzervezoError(w http.ResponseWriter, err error) bool {
 	var blocked *app.SzervezoOfActiveEsemenyError
-	var none *app.NoEligibleSzervezoError
 	switch {
 	case errors.As(err, &blocked):
 		list := make([]esemenyRefJSON, 0, len(blocked.Esemenyek))
@@ -239,8 +238,6 @@ func writeSzervezoError(w http.ResponseWriter, err error) bool {
 			list = append(list, toEsemenyRefJSON(e))
 		}
 		writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "code": "szervezo_of_active_esemeny", "esemenyek": list})
-	case errors.As(err, &none):
-		writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "code": "no_eligible_szervezo", "esemeny": toEsemenyRefJSON(none.Esemeny)})
 	case errors.Is(err, app.ErrNotEligibleSzervezo):
 		writeCodedError(w, http.StatusConflict, err, "not_eligible_szervezo")
 	default:

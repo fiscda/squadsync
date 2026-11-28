@@ -485,31 +485,153 @@ func TestRemovingASzervezoWithAnInvalidPickChangesNothing(t *testing.T) {
 	}
 }
 
-func TestRemovingASzervezoWhoseEsemenyHasNobodyToTakeItIsRefusedByName(t *testing.T) {
+func TestRemovingASzervezoCancelsTheEsemenyNobodyElseAnswered(t *testing.T) {
 	h, c, first, second := removalWorld(t)
 	ctx := context.Background()
 	lonely := propose(t, h, "bela", c.ID, 1) // nobody answered it
+	h.Clock.Advance(time.Minute)
+	confirmed := propose(t, h, "bela", c.ID, 1)
+	confirm(t, h, "bela", detail(t, h, "bela", confirmed.ID), 0) // Veglegesitve, nobody answered either
+	h.Clock.Advance(time.Minute)
 	dms := len(h.Discord.DMs())
 
-	err := h.App.RemoveTag(ctx, "anna", c.ID, "bela", map[string]string{first.ID: "cecil", second.ID: "anna", lonely.ID: "cecil"})
-
-	var none *app.NoEligibleSzervezoError
-	if !errors.Is(err, app.ErrNoEligibleSzervezo) || !errors.As(err, &none) || none.Esemeny.ID != lonely.ID || none.Esemeny.Title != "Társasjáték" {
-		t.Fatalf("err = %v, want ErrNoEligibleSzervezo naming the lonely Esemeny", err)
+	// The Esemenyek that others answered still need a pick; the lonely ones don't.
+	err := h.App.RemoveTag(ctx, "anna", c.ID, "bela", map[string]string{first.ID: "cecil"})
+	var blocked *app.SzervezoOfActiveEsemenyError
+	if !errors.As(err, &blocked) || len(blocked.Esemenyek) != 1 || blocked.Esemenyek[0].ID != second.ID {
+		t.Fatalf("err = %v, want it to name only the second Esemeny", err)
 	}
 	expectUntouched(t, h, c, first, second, dms)
-	if got := szervezoOf(t, h, lonely.ID); got != "bela" {
-		t.Fatalf("szervezo of the lonely one = %s, want bela", got)
+	for _, id := range []string{lonely.ID, confirmed.ID} {
+		if got := detail(t, h, "anna", id); got.Allapot == domain.Elmaradt {
+			t.Fatalf("esemeny %s was cancelled by a refused removal", id)
+		}
 	}
 
-	// The Szervezo cancelling it frees the way, and the Admin can't do that.
-	if err := h.App.CancelEsemeny(ctx, "anna", lonely.ID); !errors.Is(err, app.ErrNotSzervezo) {
+	if err := h.App.RemoveTag(ctx, "anna", c.ID, "bela", map[string]string{first.ID: "cecil", second.ID: "anna"}); err != nil {
+		t.Fatalf("RemoveTag: %v", err)
+	}
+
+	if isTag(t, h, "bela", c.ID) {
+		t.Fatal("Bela is still a Tag")
+	}
+	for _, id := range []string{lonely.ID, confirmed.ID} {
+		if got := detail(t, h, "anna", id).Allapot; got != domain.Elmaradt {
+			t.Fatalf("allapot of %s = %s, want Elmaradt", id, got)
+		}
+	}
+	if got := szervezoOf(t, h, first.ID); got != "cecil" {
+		t.Fatalf("first szervezo = %s, want cecil", got)
+	}
+	if got := allapotOf(t, h, second.ID); got != domain.Veglegesitve {
+		t.Fatalf("second allapot = %s, want it kept", got)
+	}
+	// Each cancellation is announced like a Szervezo's own (no Csatorna: by DM
+	// to every Tag but the Admin who acted, and the removed Tag is gone).
+	got := map[string]int{}
+	for _, dm := range h.Discord.DMs() {
+		if dm.Announcement != nil && dm.Announcement.Headline == "❌ Elmaradt" {
+			got[dm.DiscordID]++
+		}
+	}
+	if got["discord-cecil"] != 2 || got["discord-dani"] != 2 || got["discord-anna"] != 0 || got["discord-bela"] != 0 {
+		t.Fatalf("cancellation announcements = %v, want two each to Cecil and Dani", got)
+	}
+	// The Admin gained no other authority: they can't cancel it themself.
+	if err := h.App.CancelEsemeny(ctx, "anna", first.ID); !errors.Is(err, app.ErrNotSzervezo) {
 		t.Fatalf("Admin cancelling: err = %v, want ErrNotSzervezo", err)
 	}
-	cancelEsemeny(t, h, "bela", lonely.ID)
-	if err := h.App.RemoveTag(ctx, "anna", c.ID, "bela", map[string]string{first.ID: "cecil", second.ID: "anna"}); err != nil {
-		t.Fatalf("RemoveTag after cancelling: %v", err)
+}
+
+func TestAnEsemenyCancelledByRemovingItsSzervezoGetsNoHataridoDM(t *testing.T) {
+	h, d, hatarido := hataridoWorld(t)
+	// Anna organises it and nobody can take it over once Bela and Cili are
+	// gone from the picture: here they simply never answered anything else.
+	ctx := context.Background()
+	for _, id := range []string{"bela", "cili"} {
+		if err := h.App.LeaveCsoport(ctx, id, d.CsoportID); err != nil {
+			t.Fatalf("%s leaving: %v", id, err)
+		}
 	}
+	// Bela and Cili are no Tags now, so Anna's Esemeny has nobody to take it.
+	addFelhasznalo(t, h, "dani", "Dani")
+	m, err := h.App.CreateCsoportMeghivo(ctx, "anna", d.CsoportID)
+	if err != nil {
+		t.Fatalf("CreateCsoportMeghivo: %v", err)
+	}
+	if _, err := h.App.JoinCsoport(ctx, "dani", m.Token); err != nil {
+		t.Fatalf("JoinCsoport: %v", err)
+	}
+	if err := h.App.SetAdmin(ctx, "anna", d.CsoportID, "dani", true); err != nil {
+		t.Fatalf("SetAdmin: %v", err)
+	}
+
+	if err := h.App.RemoveTag(ctx, "dani", d.CsoportID, "anna", nil); err != nil {
+		t.Fatalf("RemoveTag: %v", err)
+	}
+
+	runAt(t, h, hatarido.Add(time.Hour))
+	if got := detail(t, h, "dani", d.ID).Allapot; got != domain.Elmaradt {
+		t.Fatalf("allapot = %s, want Elmaradt", got)
+	}
+	if dms := hataridoDMs(h); len(dms) != 0 {
+		t.Fatalf("hatarido DMs = %+v, want none for a cancelled Esemeny", dms)
+	}
+}
+
+func TestAHandoverAfterTheHataridoPassedSendsTheNewSzervezoTheHataridoDM(t *testing.T) {
+	h, d, hatarido := hataridoWorld(t)
+	runAt(t, h, hatarido.Add(time.Minute))
+	if dms := hataridoDMs(h); len(dms) != 1 || dms[0].DiscordID != "discord-anna" {
+		t.Fatalf("hatarido DMs = %+v, want one to Anna", dms)
+	}
+
+	handOver(t, h, "anna", d.ID, "bela")
+
+	dms := hataridoDMs(h)
+	if len(dms) != 2 || dms[1].DiscordID != "discord-bela" {
+		t.Fatalf("hatarido DMs = %+v, want the second one to Bela", dms)
+	}
+	got := dms[1].Hatarido
+	if got.EsemenyID != d.ID || !got.ConfirmButtons || len(got.Idopontok) != 3 {
+		t.Fatalf("resent hatarido DM = %+v, want it with confirm buttons", got)
+	}
+	if szervezo := szervezoDMs(h); len(szervezo) != 1 {
+		t.Fatalf("szervezo DMs = %+v, want one", szervezo)
+	}
+}
+
+func TestAHandoverBeforeTheHataridoOrOutsideEgyeztetesResendsNothing(t *testing.T) {
+	t.Run("before it", func(t *testing.T) {
+		h, d, _ := hataridoWorld(t)
+		handOver(t, h, "anna", d.ID, "bela")
+		if dms := hataridoDMs(h); len(dms) != 0 {
+			t.Fatalf("hatarido DMs = %+v, want none yet", dms)
+		}
+	})
+	t.Run("after it, once Veglegesitve", func(t *testing.T) {
+		h, d, hatarido := hataridoWorld(t)
+		runAt(t, h, hatarido.Add(time.Minute))
+		confirm(t, h, "anna", d, 1)
+		handOver(t, h, "anna", d.ID, "bela")
+		if dms := hataridoDMs(h); len(dms) != 1 {
+			t.Fatalf("hatarido DMs = %+v, want only the original one", dms)
+		}
+	})
+	t.Run("after it, with the job still pending", func(t *testing.T) {
+		h, d, hatarido := hataridoWorld(t)
+		h.Clock.Set(hatarido.Add(time.Minute)) // due, but not run yet
+		handOver(t, h, "anna", d.ID, "bela")
+		if dms := hataridoDMs(h); len(dms) != 0 {
+			t.Fatalf("hatarido DMs = %+v, want none: the job sends it to Bela", dms)
+		}
+		if err := h.App.RunDueJobs(context.Background()); err != nil {
+			t.Fatalf("RunDueJobs: %v", err)
+		}
+		if dms := hataridoDMs(h); len(dms) != 1 || dms[0].DiscordID != "discord-bela" {
+			t.Fatalf("hatarido DMs = %+v, want one to Bela", dms)
+		}
+	})
 }
 
 func TestRemovingASzervezoIsRefusedAsAWholeWhenTheRemovalItselfIsRefused(t *testing.T) {

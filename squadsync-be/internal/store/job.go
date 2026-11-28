@@ -110,6 +110,38 @@ func (q Queries) FindJob(ctx context.Context, id string) (Job, error) {
 	return j, nil
 }
 
+// ListDoneJobs returns the Esemeny's done jobs of a kind, oldest first.
+func (q Queries) ListDoneJobs(ctx context.Context, esemenyID, kind string) ([]Job, error) {
+	rows, err := q.db.QueryContext(ctx,
+		`SELECT id FROM job WHERE esemeny_id = ? AND kind = ? AND done_at IS NOT NULL ORDER BY created_at, id`,
+		esemenyID, kind,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list done jobs: %w", err)
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("list done jobs: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("list done jobs: %w", err)
+	}
+	jobs := make([]Job, 0, len(ids))
+	for _, id := range ids {
+		j, err := q.FindJob(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, j)
+	}
+	return jobs, nil
+}
+
 // FinishJob marks a job done after an attempt that succeeded.
 func (q Queries) FinishJob(ctx context.Context, id string, at time.Time) error {
 	res, err := q.db.ExecContext(ctx,

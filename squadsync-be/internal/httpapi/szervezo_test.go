@@ -121,16 +121,30 @@ func TestRemoveTagRouteTakesANewSzervezoForEachEsemeny(t *testing.T) {
 	}
 }
 
-func TestRemoveTagRouteNamesAnEsemenyNobodyCanTake(t *testing.T) {
-	api, csoportID, _ := szervezoCsoport(t)
+func TestRemoveTagRouteCancelsAnEsemenyNobodyElseAnswered(t *testing.T) {
+	api, csoportID, id := szervezoCsoport(t)
 	lonely := decode[esemenyResp](t, call(t, api, http.MethodPost, "/csoport/"+csoportID+"/esemeny", proposal, as("bela")))
+	bela := "/csoport/" + csoportID + "/tag/bela"
 
-	rec := call(t, api, http.MethodDelete, "/csoport/"+csoportID+"/tag/bela", `{"szervezok":{}}`, as("anna"))
-
+	// Anna answered the first Esemeny, so it still needs a pick.
+	rec := call(t, api, http.MethodDelete, bela, `{"szervezok":{}}`, as("anna"))
 	expectStatus(t, rec, http.StatusConflict)
-	e := decode[szervezoErrorResp](t, rec)
-	if e.Code != "no_eligible_szervezo" || e.Esemeny == nil || e.Esemeny.ID != lonely.ID {
-		t.Fatalf("error = %+v, want no_eligible_szervezo naming %s", e, lonely.ID)
+	if e := decode[szervezoErrorResp](t, rec); e.Code != "szervezo_of_active_esemeny" || len(e.Esemenyek) != 1 || e.Esemenyek[0].ID != id {
+		t.Fatalf("error = %+v, want only the answered Esemeny named", e)
 	}
 	expectStatus(t, call(t, api, http.MethodGet, "/csoport/"+csoportID, "", as("bela")), http.StatusOK)
+
+	expectStatus(t, call(t, api, http.MethodDelete, bela, `{"szervezok":{"`+id+`":"anna"}}`, as("anna")), http.StatusNoContent)
+	if d := decode[esemenyDetailResp](t, call(t, api, http.MethodGet, "/esemeny/"+lonely.ID, "", as("anna"))); d.Allapot != "elmaradt" {
+		t.Fatalf("allapot = %s, want elmaradt", d.Allapot)
+	}
+}
+
+func TestRemoveTagRouteToleratesAnEmptyBody(t *testing.T) {
+	api, _, id := adminCsoport(t)
+	cecil := "/csoport/" + id + "/tag/cecil"
+
+	// No body, a blank one and an empty object all mean no picks.
+	expectStatus(t, call(t, api, http.MethodDelete, cecil, "", as("anna")), http.StatusNoContent)
+	expectStatus(t, call(t, api, http.MethodDelete, "/csoport/"+id+"/tag/bela", " ", as("anna")), http.StatusNoContent)
 }
