@@ -19,6 +19,7 @@ func (s *server) registerCsoport(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /csoport/{id}/name", withFelhasznalo(s.renameCsoport))
 	mux.HandleFunc("PUT /csoport/{id}/tag/{felhasznaloID}/admin", withFelhasznalo(s.setAdmin))
 	mux.HandleFunc("DELETE /csoport/{id}/tag/{felhasznaloID}", withFelhasznalo(s.removeTag))
+	mux.HandleFunc("GET /csoport/{id}/tag/{felhasznaloID}/szervezo-esemenyek", withFelhasznalo(s.szervezoEsemenyek))
 	mux.HandleFunc("POST /csoport/{id}/kilepes", withFelhasznalo(s.leaveCsoport))
 	mux.HandleFunc("PUT /csoport/{id}/nemitas", withFelhasznalo(s.setMuted))
 	// Linking a channel happens in Discord (/csatorna); the web only unlinks.
@@ -171,12 +172,78 @@ func (s *server) setAdmin(w http.ResponseWriter, r *http.Request, felhasznaloID 
 }
 
 func (s *server) removeTag(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
-	err := s.app.RemoveTag(r.Context(), felhasznaloID, r.PathValue("id"), r.PathValue("felhasznaloID"))
+	// The body is optional: it names the new Szervezo of each Esemeny the
+	// removed Tag is the Szervezo of.
+	var body struct {
+		// Szervezok maps an Esemeny id to the new Szervezo's Felhasznalo id.
+		Szervezok map[string]string `json:"szervezok"`
+	}
+	if !decodeOptionalJSON(w, r, &body) {
+		return
+	}
+	err := s.app.RemoveTag(r.Context(), felhasznaloID, r.PathValue("id"), r.PathValue("felhasznaloID"), body.Szervezok)
 	if err != nil {
 		s.writeCsoportError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+type esemenyRefJSON struct {
+	ID      string `json:"id"`
+	Title   string `json:"title"`
+	Allapot string `json:"allapot"`
+}
+
+func toEsemenyRefJSON(e app.EsemenyRef) esemenyRefJSON {
+	return esemenyRefJSON{ID: e.ID, Title: e.Title, Allapot: string(e.Allapot)}
+}
+
+type szervezoEsemenyJSON struct {
+	esemenyRefJSON
+	// Utodok are the Tags the Szervezo role could go to.
+	Utodok []szervezoJeloltJSON `json:"utodok"`
+}
+
+type szervezoJeloltJSON struct {
+	FelhasznaloID string `json:"felhasznaloId"`
+	Name          string `json:"name"`
+}
+
+func (s *server) szervezoEsemenyek(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
+	list, err := s.app.SzervezoEsemenyek(r.Context(), felhasznaloID, r.PathValue("id"), r.PathValue("felhasznaloID"))
+	if err != nil {
+		s.writeCsoportError(w, r, err)
+		return
+	}
+	out := make([]szervezoEsemenyJSON, 0, len(list))
+	for _, e := range list {
+		utodok := make([]szervezoJeloltJSON, 0, len(e.Utodok))
+		for _, t := range e.Utodok {
+			utodok = append(utodok, szervezoJeloltJSON{FelhasznaloID: t.FelhasznaloID, Name: t.FelhasznaloName})
+		}
+		out = append(out, szervezoEsemenyJSON{esemenyRefJSON: toEsemenyRefJSON(e.EsemenyRef), Utodok: utodok})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// writeSzervezoError answers the errors of handing over the Szervezo role,
+// with a code the web tells apart. It reports whether err was one of them.
+func writeSzervezoError(w http.ResponseWriter, err error) bool {
+	var blocked *app.SzervezoOfActiveEsemenyError
+	switch {
+	case errors.As(err, &blocked):
+		list := make([]esemenyRefJSON, 0, len(blocked.Esemenyek))
+		for _, e := range blocked.Esemenyek {
+			list = append(list, toEsemenyRefJSON(e))
+		}
+		writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "code": "szervezo_of_active_esemeny", "esemenyek": list})
+	case errors.Is(err, app.ErrNotEligibleSzervezo):
+		writeCodedError(w, http.StatusConflict, err, "not_eligible_szervezo")
+	default:
+		return false
+	}
+	return true
 }
 
 func (s *server) leaveCsoport(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
@@ -282,8 +349,7 @@ func (s *server) writeCsoportError(w http.ResponseWriter, r *http.Request, err e
 		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error(), "code": "last_admin"})
 		return
 	}
-	if errors.Is(err, app.ErrSzervezoOfActiveEsemeny) {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error(), "code": "szervezo_of_active_esemeny"})
+	if writeSzervezoError(w, err) {
 		return
 	}
 	if errors.Is(err, app.ErrFelhasznaloUnknown) || errors.Is(err, app.ErrNotAdmin) {

@@ -22,6 +22,8 @@ export class BackendError extends Error {
     message: string,
     /** Go's machine-readable reason for some errors, e.g. "last_admin"; "" otherwise. */
     readonly code: string = "",
+    /** The raw response body, for errors that carry more than a code. */
+    readonly body: string = "",
   ) {
     super(message);
     this.name = "BackendError";
@@ -80,6 +82,7 @@ export async function callBackend<T>(
       res.status,
       `${method} ${path} failed with ${res.status}: ${text}`,
       errorCode(text),
+      text,
     );
   }
   if (res.status === 204) {
@@ -385,19 +388,58 @@ export async function setTagAdmin(
   );
 }
 
+/** An Esemény named in a refusal or a list. */
+export type EsemenyRef = {
+  id: string;
+  title: string;
+  allapot: Allapot;
+};
+
+/** An active Esemény a Tag is the Szervező of, with who could take it over. */
+export type SzervezoEsemeny = EsemenyRef & {
+  /** Tags with a Visszajelzés on it, ordered by name; empty if nobody. */
+  utodok: { felhasznaloId: string; name: string }[];
+};
+
 /**
- * Removes a Tag. Admins only (403). Go answers 409 with code "last_admin" or
- * "szervezo_of_active_esemeny".
+ * The Események in Egyeztetés or Véglegesítve that the Tag is the Szervező
+ * of, oldest first, each with the Tags it could be handed to. A Tag may ask
+ * about themselves, an Admin about any Tag (403 otherwise). These Események
+ * stop the Tag from leaving, and an Admin removing them must reassign each.
+ */
+export function listSzervezoEsemenyek(
+  felhasznaloId: string,
+  csoportId: string,
+  targetId: string,
+): Promise<SzervezoEsemeny[]> {
+  return callBackend(
+    felhasznaloId,
+    "GET",
+    `/csoport/${encodeURIComponent(csoportId)}/tag/${encodeURIComponent(targetId)}/szervezo-esemenyek`,
+  );
+}
+
+/**
+ * Removes a Tag. Admins only (403). If the Tag is the Szervező of active
+ * Események, `szervezok` must name a new Szervező (a Felhasználó id) for each
+ * Esemény id that someone else answered; the ones nobody else answered (no
+ * `utodok`) are cancelled by the removal. Otherwise Go answers 409 with code:
+ * - "szervezo_of_active_esemeny": an Esemény has no pick,
+ * - "not_eligible_szervezo": a pick isn't a Tag with a Visszajelzés on it,
+ * - "last_admin".
+ * Nothing changes when it is refused.
  */
 export async function removeTag(
   felhasznaloId: string,
   csoportId: string,
   targetId: string,
+  szervezok: Record<string, string> = {},
 ): Promise<void> {
   await callBackend<void>(
     felhasznaloId,
     "DELETE",
     `/csoport/${encodeURIComponent(csoportId)}/tag/${encodeURIComponent(targetId)}`,
+    Object.keys(szervezok).length === 0 ? undefined : { szervezok },
   );
 }
 
@@ -851,6 +893,24 @@ export async function cancelEsemeny(
     felhasznaloId,
     "POST",
     `/esemeny/${encodeURIComponent(esemenyId)}/lemondas`,
+  );
+}
+
+/**
+ * The Szervező hands the role to another Tag, who needs a Visszajelzés on
+ * the Esemény (409 with code "not_eligible_szervezo" otherwise). Only in
+ * Egyeztetés or Véglegesítve (409), and only the Szervező may (403).
+ */
+export async function handOverSzervezo(
+  felhasznaloId: string,
+  esemenyId: string,
+  newSzervezoId: string,
+): Promise<void> {
+  await callBackend<void>(
+    felhasznaloId,
+    "POST",
+    `/esemeny/${encodeURIComponent(esemenyId)}/szervezo-atadas`,
+    { felhasznaloId: newSzervezoId },
   );
 }
 

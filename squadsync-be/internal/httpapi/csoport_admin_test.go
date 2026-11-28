@@ -5,7 +5,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"squadsync-be/internal/apptest"
@@ -88,25 +87,20 @@ func TestRemoveTagAndLeaveRoutes(t *testing.T) {
 	expectStatus(t, call(t, api, http.MethodDelete, cecil, "", as("bela")), http.StatusForbidden)
 	expectStatus(t, call(t, api, http.MethodDelete, "/csoport/"+id+"/tag/nincs", "", as("anna")), http.StatusNotFound)
 
-	// The Szervezo of an active Esemeny can be neither removed nor leave.
+	// The Szervezo of an active Esemeny can't leave.
 	err := h.Store.InsertEsemeny(context.Background(), domain.Esemeny{
 		ID: "e1", CsoportID: id, Title: "Játék", SzervezoID: "cecil", Allapot: domain.Egyeztetes, CreatedAt: apptest.Start,
 	})
 	if err != nil {
 		t.Fatalf("InsertEsemeny: %v", err)
 	}
-	for _, rec := range []*httptest.ResponseRecorder{
-		call(t, api, http.MethodDelete, cecil, "", as("anna")),
-		call(t, api, http.MethodPost, "/csoport/"+id+"/kilepes", "", as("cecil")),
-	} {
-		expectStatus(t, rec, http.StatusConflict)
-		if e := decode[errorResp](t, rec); e.Code != "szervezo_of_active_esemeny" {
-			t.Fatalf("error = %+v, want code szervezo_of_active_esemeny", e)
-		}
+	rec := call(t, api, http.MethodPost, "/csoport/"+id+"/kilepes", "", as("cecil"))
+	expectStatus(t, rec, http.StatusConflict)
+	if e := decode[errorResp](t, rec); e.Code != "szervezo_of_active_esemeny" {
+		t.Fatalf("error = %+v, want code szervezo_of_active_esemeny", e)
 	}
-
 	// The last Admin can't leave while others remain.
-	rec := call(t, api, http.MethodPost, "/csoport/"+id+"/kilepes", "", as("anna"))
+	rec = call(t, api, http.MethodPost, "/csoport/"+id+"/kilepes", "", as("anna"))
 	expectStatus(t, rec, http.StatusConflict)
 	if e := decode[errorResp](t, rec); e.Code != "last_admin" {
 		t.Fatalf("error = %+v, want code last_admin", e)

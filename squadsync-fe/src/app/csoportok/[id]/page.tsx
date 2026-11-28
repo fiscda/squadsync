@@ -1,8 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import type { CsoportDetail } from "@/lib/backend";
-import { getCsoport, getCsoportMeghivok } from "@/lib/csoport";
+import type { CsoportDetail, EsemenyRef } from "@/lib/backend";
+import {
+  getCsoport,
+  getCsoportMeghivok,
+  getSzervezoEsemenyek,
+} from "@/lib/csoport";
 import { emlekeztetoLabel } from "@/lib/emlekezteto";
 import { requireFelhasznalo } from "@/lib/felhasznalo";
 import {
@@ -47,6 +51,21 @@ async function Csoport({ csoportId }: { csoportId: string }) {
     notFound();
   }
   const felhasznalo = await requireFelhasznalo();
+  // What stops each Tag from leaving or being removed: the active Események
+  // they organise. An Admin sees it for every Tag, anyone else for themself.
+  const szervezoEsemenyek = new Map(
+    await Promise.all(
+      csoport.tags
+        .filter((t) => csoport.admin || t.felhasznaloId === felhasznalo.id)
+        .map(
+          async (t) =>
+            [
+              t.felhasznaloId,
+              await getSzervezoEsemenyek(csoport.id, t.felhasznaloId),
+            ] as const,
+        ),
+    ),
+  );
 
   return (
     <>
@@ -90,6 +109,9 @@ async function Csoport({ csoportId }: { csoportId: string }) {
                   tagName={tag.name}
                   admin={tag.admin}
                   self={tag.felhasznaloId === felhasznalo.id}
+                  szervezoEsemenyek={
+                    szervezoEsemenyek.get(tag.felhasznaloId) ?? []
+                  }
                 />
               )}
             </li>
@@ -103,12 +125,21 @@ async function Csoport({ csoportId }: { csoportId: string }) {
 
       <EmlekeztetoSection csoport={csoport} />
 
-      <BeallitasokSection csoport={csoport} />
+      <BeallitasokSection
+        csoport={csoport}
+        blocking={szervezoEsemenyek.get(felhasznalo.id) ?? []}
+      />
     </>
   );
 }
 
-function BeallitasokSection({ csoport }: { csoport: CsoportDetail }) {
+function BeallitasokSection({
+  csoport,
+  blocking,
+}: {
+  csoport: CsoportDetail;
+  blocking: EsemenyRef[];
+}) {
   return (
     <section className="flex flex-col gap-3">
       <h2 className="text-xl font-semibold">Saját beállításaim</h2>
@@ -130,7 +161,7 @@ function BeallitasokSection({ csoport }: { csoport: CsoportDetail }) {
           </button>
         </form>
       </div>
-      <LeaveControl csoportId={csoport.id} />
+      <LeaveControl csoportId={csoport.id} blocking={blocking} />
     </section>
   );
 }

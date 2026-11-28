@@ -163,17 +163,17 @@ func TestOnlyAdminsRemoveTags(t *testing.T) {
 	c := csoportOf(t, h, "bela", "cecil")
 	addFelhasznalo(t, h, "kivul", "Kívül")
 
-	if err := h.App.RemoveTag(ctx, "bela", c.ID, "cecil"); !errors.Is(err, app.ErrNotAdmin) {
+	if err := h.App.RemoveTag(ctx, "bela", c.ID, "cecil", nil); !errors.Is(err, app.ErrNotAdmin) {
 		t.Fatalf("Tag removing: err = %v, want ErrNotAdmin", err)
 	}
-	if err := h.App.RemoveTag(ctx, "kivul", c.ID, "cecil"); !errors.Is(err, app.ErrNotFound) {
+	if err := h.App.RemoveTag(ctx, "kivul", c.ID, "cecil", nil); !errors.Is(err, app.ErrNotFound) {
 		t.Fatalf("non-Tag removing: err = %v, want ErrNotFound", err)
 	}
-	if err := h.App.RemoveTag(ctx, "anna", c.ID, "kivul"); !errors.Is(err, app.ErrNotFound) {
+	if err := h.App.RemoveTag(ctx, "anna", c.ID, "kivul", nil); !errors.Is(err, app.ErrNotFound) {
 		t.Fatalf("removing a non-Tag: err = %v, want ErrNotFound", err)
 	}
 
-	if err := h.App.RemoveTag(ctx, "anna", c.ID, "cecil"); err != nil {
+	if err := h.App.RemoveTag(ctx, "anna", c.ID, "cecil", nil); err != nil {
 		t.Fatalf("RemoveTag: %v", err)
 	}
 	if isTag(t, h, "cecil", c.ID) {
@@ -183,7 +183,7 @@ func TestOnlyAdminsRemoveTags(t *testing.T) {
 		t.Fatal("Bela lost their Tag")
 	}
 	// The last Admin can't remove themselves either.
-	if err := h.App.RemoveTag(ctx, "anna", c.ID, "anna"); !errors.Is(err, app.ErrLastAdmin) {
+	if err := h.App.RemoveTag(ctx, "anna", c.ID, "anna", nil); !errors.Is(err, app.ErrLastAdmin) {
 		t.Fatalf("last Admin removing themselves: err = %v, want ErrLastAdmin", err)
 	}
 }
@@ -297,7 +297,7 @@ func TestALeavingTagKeepsTheirVisszajelzesButItNoLongerCounts(t *testing.T) {
 	}
 }
 
-func TestASzervezoOfAnActiveEsemenyCantLeaveOrBeRemoved(t *testing.T) {
+func TestASzervezoOfAnActiveEsemenyCantLeaveWithoutAHandover(t *testing.T) {
 	for _, allapot := range []domain.Allapot{domain.Egyeztetes, domain.Veglegesitve} {
 		t.Run(string(allapot), func(t *testing.T) {
 			h := apptest.New(t)
@@ -307,9 +307,6 @@ func TestASzervezoOfAnActiveEsemenyCantLeaveOrBeRemoved(t *testing.T) {
 
 			if err := h.App.LeaveCsoport(ctx, "bela", c.ID); !errors.Is(err, app.ErrSzervezoOfActiveEsemeny) {
 				t.Fatalf("leaving: err = %v, want ErrSzervezoOfActiveEsemeny", err)
-			}
-			if err := h.App.RemoveTag(ctx, "anna", c.ID, "bela"); !errors.Is(err, app.ErrSzervezoOfActiveEsemeny) {
-				t.Fatalf("removing: err = %v, want ErrSzervezoOfActiveEsemeny", err)
 			}
 			if !isTag(t, h, "bela", c.ID) {
 				t.Fatal("Bela lost their Tag despite the refusal")
@@ -334,7 +331,7 @@ func TestASzervezoOfAnEsemenyThatIsOverCanLeave(t *testing.T) {
 			if err := h.App.LeaveCsoport(ctx, "bela", c.ID); err != nil {
 				t.Fatalf("leaving: %v", err)
 			}
-			if err := h.App.RemoveTag(ctx, "anna", c.ID, "cecil"); err != nil {
+			if err := h.App.RemoveTag(ctx, "anna", c.ID, "cecil", nil); err != nil {
 				t.Fatalf("removing: %v", err)
 			}
 		})
