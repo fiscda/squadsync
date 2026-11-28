@@ -27,7 +27,6 @@ type autokResp struct {
 		FelhasznaloID string `json:"felhasznaloId"`
 		Name          string `json:"name"`
 	} `json:"helyNelkul"`
-	CanOffer        bool   `json:"canOffer"`
 	CanClaim        bool   `json:"canClaim"`
 	SajatAutoID     string `json:"sajatAutoId"`
 	SajatUlesAutoID string `json:"sajatUlesAutoId"`

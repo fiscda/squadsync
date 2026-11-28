@@ -41,7 +41,7 @@ export type Autok = {
   sajatUton: Szemely[];
   /** Résztvevők with no seat who aren't saját úton. */
   helyNelkul: Szemely[];
-  canOffer: boolean;
+  /** May offer an Autó, claim a seat or go saját úton (not a Sofőr). */
   canClaim: boolean;
   /** The Autó the caller drives, "" for none. */
   sajatAutoId: string;

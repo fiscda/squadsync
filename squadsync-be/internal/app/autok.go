@@ -117,10 +117,9 @@ type Autok struct {
 	// HelyNelkul are the Resztvevok with no seat: everyone but the Sofors,
 	// the passengers and those saját úton.
 	HelyNelkul []domain.Resztvevo
-	// CanOffer tells whether the viewer may offer an Auto now.
-	CanOffer bool
-	// CanClaim tells whether the viewer may claim a seat or mark themselves
-	// saját úton now (a Resztvevo while Veglegesitve who isn't a Sofor).
+	// CanClaim tells whether the viewer may offer an Auto, claim a seat or
+	// mark themselves saját úton now: a Resztvevo while Veglegesitve who
+	// isn't a Sofor yet (a Sofor can do none of the three).
 	CanClaim bool
 	// SajatAutoID is the Auto the viewer drives, "" for none.
 	SajatAutoID string
@@ -254,7 +253,6 @@ func (a *App) Autok(ctx context.Context, felhasznaloID, esemenyID string) (Autok
 	if err != nil {
 		return Autok{}, err
 	}
-	out.CanOffer = can && out.SajatAutoID == ""
 	out.CanClaim = can && out.SajatAutoID == ""
 	return out, nil
 }

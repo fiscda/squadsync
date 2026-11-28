@@ -112,7 +112,7 @@ func TestAResztvevoOffersAnAutoAndBecomesItsSofor(t *testing.T) {
 	if len(a.Autok) != 1 || a.Autok[0].SoforName != "bela" || a.Autok[0].Szabad != 3 || a.Autok[0].CanEdit || a.Autok[0].CanDelete {
 		t.Fatalf("Cecil sees %+v", a.Autok)
 	}
-	if a := autokOf(t, h, "bela", d.ID); a.SajatAutoID != auto.ID || !a.Autok[0].CanEdit || !a.Autok[0].CanDelete || a.CanOffer {
+	if a := autokOf(t, h, "bela", d.ID); a.SajatAutoID != auto.ID || !a.Autok[0].CanEdit || !a.Autok[0].CanDelete || a.CanClaim {
 		t.Fatalf("Bela sees %+v", a)
 	}
 
@@ -629,5 +629,58 @@ func TestTheEsemenyMessageSummarisesAutok(t *testing.T) {
 	switchKiegeszito(t, h, "anna", e.ID, domain.Autok, false)
 	if got := lastSummary(); got != "" {
 		t.Fatalf("summary once switched off = %q, want none", got)
+	}
+}
+
+func TestTheSzervezoCantMoveAnyoneOntoAFullAuto(t *testing.T) {
+	h, d := autokTrip(t)
+	ctx := context.Background()
+	belas := autoOffer(t, h, "bela", d.ID, 1)
+	doras := autoOffer(t, h, "dora", d.ID, 2)
+	autoClaim(t, h, "cecil", d.ID, belas.ID)
+	autoClaim(t, h, "anna", d.ID, doras.ID)
+
+	// Anna, a passenger of Dora's, can't move onto Bela's full Auto, and
+	// nobody loses what they had.
+	if err := h.App.MoveUtas(ctx, "anna", d.ID, belas.ID, app.UtasInput{FelhasznaloID: "anna"}); !errors.Is(err, app.ErrAutoFull) {
+		t.Fatalf("moving onto a full Auto: err = %v, want ErrAutoFull", err)
+	}
+	if err := h.App.MoveUtas(ctx, "anna", d.ID, belas.ID, app.UtasInput{FelhasznaloID: "bela"}); !errors.Is(err, app.ErrSoforCantRide) {
+		t.Fatalf("seating a Sofor: err = %v, want ErrSoforCantRide", err)
+	}
+	expectAutoLayout(t, autokOf(t, h, "anna", d.ID), "bela:cecil", "dora:anna")
+}
+
+func TestTheSzervezoCantSeatSomeoneWhoIsNoResztvevo(t *testing.T) {
+	h, d := autokTrip(t)
+	ctx := context.Background()
+	belas := autoOffer(t, h, "bela", d.ID, 3)
+
+	// Emil said nem; Dani isn't a Tag.
+	for _, who := range []string{"emil", "dani"} {
+		err := h.App.MoveUtas(ctx, "anna", d.ID, belas.ID, app.UtasInput{FelhasznaloID: who})
+		if !errors.Is(err, app.ErrNotResztvevo) {
+			t.Fatalf("seating %s: err = %v, want ErrNotResztvevo", who, err)
+		}
+	}
+	expectAutoLayout(t, autokOf(t, h, "anna", d.ID), "bela:")
+}
+
+func TestTheSzervezoSeatsSomeoneMarkedSajatUton(t *testing.T) {
+	h, d := autokTrip(t)
+	ctx := context.Background()
+	belas := autoOffer(t, h, "bela", d.ID, 2)
+	if err := h.App.SetSajatUton(ctx, "cecil", d.ID, app.SajatUtonInput{On: true}); err != nil {
+		t.Fatalf("SetSajatUton: %v", err)
+	}
+
+	if err := h.App.MoveUtas(ctx, "anna", d.ID, belas.ID, app.UtasInput{FelhasznaloID: "cecil"}); err != nil {
+		t.Fatalf("seating someone saját úton: %v", err)
+	}
+
+	a := autokOf(t, h, "cecil", d.ID)
+	expectAutoLayout(t, a, "bela:cecil")
+	if a.SajatUtonVan || len(a.SajatUton) != 0 {
+		t.Fatalf("saját úton = %+v, want the mark cleared by the seat", a.SajatUton)
 	}
 }

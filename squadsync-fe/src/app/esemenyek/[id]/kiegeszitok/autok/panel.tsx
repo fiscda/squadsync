@@ -29,12 +29,15 @@ export async function AutokPanel({ esemeny }: KiegeszitoPanelProps) {
   const {
     helyNelkul,
     sajatUton,
-    canOffer,
     canClaim,
     sajatUlesAutoId,
     sajatUtonVan,
     isSzervezo,
   } = autok;
+  // Go refuses every change but "Beszállok" and the like unless the Esemény
+  // is véglegesítve, so the controls that only change seats show only then.
+  const veglegesitve = esemeny.allapot === "veglegesitve";
+  const canMove = isSzervezo && veglegesitve;
   const anySetup = autok.autok.length > 0 || sajatUton.length > 0;
 
   return (
@@ -68,8 +71,8 @@ export async function AutokPanel({ esemeny }: KiegeszitoPanelProps) {
               all={autok.autok}
               canClaim={canClaim}
               hasSeat={sajatUlesAutoId !== ""}
-              mine={sajatUlesAutoId === auto.id}
-              isSzervezo={isSzervezo}
+              mine={sajatUlesAutoId === auto.id && veglegesitve}
+              canMove={canMove}
             />
           ))}
         </ul>
@@ -89,13 +92,19 @@ export async function AutokPanel({ esemeny }: KiegeszitoPanelProps) {
         </form>
       ) : null}
 
-      {isSzervezo && helyNelkul.length > 0 && autok.autok.length > 0 ? (
+      {canMove && autok.autok.length > 0 ? (
         <ul className="flex flex-col gap-2 text-sm">
-          {helyNelkul
-            .filter((s) => s.felhasznaloId !== "")
-            .map((s) => (
+          {[
+            ...helyNelkul.map((s) => ({ szemely: s, sajatUton: false })),
+            ...sajatUton.map((s) => ({ szemely: s, sajatUton: true })),
+          ]
+            .filter(({ szemely }) => szemely.felhasznaloId !== "")
+            .map(({ szemely: s, sajatUton: uton }) => (
               <li key={s.felhasznaloId} className="flex items-center gap-2">
-                <span>{nameOf(s)}</span>
+                <span>
+                  {nameOf(s)}
+                  {uton ? " (saját úton)" : ""}
+                </span>
                 <MoveForm
                   esemenyId={esemeny.id}
                   szemely={s}
@@ -108,7 +117,7 @@ export async function AutokPanel({ esemeny }: KiegeszitoPanelProps) {
         </ul>
       ) : null}
 
-      {canOffer ? (
+      {canClaim ? (
         <form
           action={offerAutoAction.bind(null, esemeny.id)}
           className="flex flex-wrap items-end gap-2"
@@ -190,7 +199,7 @@ function AutoItem({
   canClaim,
   hasSeat,
   mine,
-  isSzervezo,
+  canMove,
 }: {
   esemenyId: string;
   auto: AutoAllas;
@@ -198,7 +207,7 @@ function AutoItem({
   canClaim: boolean;
   hasSeat: boolean;
   mine: boolean;
-  isSzervezo: boolean;
+  canMove: boolean;
 }) {
   return (
     <li className="flex flex-col gap-2 border-t border-zinc-200 pt-3 first:border-t-0 first:pt-0 dark:border-zinc-800">
@@ -221,7 +230,7 @@ function AutoItem({
               className="flex flex-wrap items-center gap-2"
             >
               <span>{nameOf(u)}</span>
-              {isSzervezo && u.felhasznaloId !== "" ? (
+              {canMove && u.felhasznaloId !== "" ? (
                 <>
                   <MoveForm
                     esemenyId={esemenyId}

@@ -52,7 +52,6 @@ type autokJSON struct {
 	Autok           []autoAllasJSON `json:"autok"`
 	SajatUton       []utasJSON      `json:"sajatUton"`
 	HelyNelkul      []utasJSON      `json:"helyNelkul"`
-	CanOffer        bool            `json:"canOffer"`
 	CanClaim        bool            `json:"canClaim"`
 	SajatAutoID     string          `json:"sajatAutoId"`
 	SajatUlesAutoID string          `json:"sajatUlesAutoId"`
@@ -87,7 +86,6 @@ func (s *server) getAutok(w http.ResponseWriter, r *http.Request, felhasznaloID 
 		Autok:           make([]autoAllasJSON, 0, len(a.Autok)),
 		SajatUton:       make([]utasJSON, 0, len(a.SajatUton)),
 		HelyNelkul:      make([]utasJSON, 0, len(a.HelyNelkul)),
-		CanOffer:        a.CanOffer,
 		CanClaim:        a.CanClaim,
 		SajatAutoID:     a.SajatAutoID,
 		SajatUlesAutoID: a.SajatUlesAutoID,
