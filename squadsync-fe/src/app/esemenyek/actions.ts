@@ -3,17 +3,23 @@
 import { revalidatePath } from "next/cache";
 import { redirect, unstable_rethrow } from "next/navigation";
 import {
+  addIdopont,
   BackendError,
   cancelEsemeny,
   confirmIdopont,
+  copyEsemeny,
   type EsemenyInput,
+  editEsemeny,
   proposeEsemeny,
+  removeIdopont,
   reopenEgyeztetes,
   setHatarido,
   setVisszajelzes,
   type Valasz,
 } from "@/lib/backend";
 import { requireFelhasznalo } from "@/lib/felhasznalo";
+import { idopontokFromForm, nonexistentTimeError } from "./idopont-input";
+import { MAX_IDOPONTOK } from "./limits";
 
 export type ProposeEsemenyState = { error?: string };
 
@@ -30,8 +36,6 @@ export async function proposeEsemenyAction(
 ): Promise<ProposeEsemenyState> {
   const felhasznalo = await requireFelhasznalo();
   const text = (name: string) => String(formData.get(name) ?? "").trim();
-  const all = (name: string) =>
-    formData.getAll(name).map((v) => String(v).trim());
 
   const input: EsemenyInput = {
     title: text("title"),
@@ -55,55 +59,11 @@ export async function proposeEsemenyAction(
     };
   }
 
-  const egeszNaposFlags = all("egeszNapos");
-  const startDates = all("startDate");
-  const startTimes = all("startTime");
-  const endDates = all("endDate");
-  const endTimes = all("endTime");
-  for (let i = 0; i < startDates.length; i++) {
-    const n = i + 1;
-    const startDate = startDates[i];
-    const startTime = startTimes[i] ?? "";
-    let endDate = endDates[i] ?? "";
-    const endTime = endTimes[i] ?? "";
-    if (egeszNaposFlags[i] === "1") {
-      // Whole days: only the first and (optionally) the last day count.
-      if (startDate === "") {
-        return { error: `A(z) ${n}. időpontnál add meg az első napot.` };
-      }
-      if (endDate !== "" && endDate < startDate) {
-        return {
-          error: `A(z) ${n}. időpont utolsó napja nem lehet az első előtt.`,
-        };
-      }
-      input.idopontok.push({
-        start: startDate,
-        end: endDate,
-        egeszNapos: true,
-      });
-      continue;
-    }
-    if (startDate === "" || startTime === "") {
-      return {
-        error: `A(z) ${n}. időpontnál add meg a kezdés napját és idejét.`,
-      };
-    }
-    if (endDate !== "" && endTime === "") {
-      return { error: `A(z) ${n}. időpontnál add meg a befejezés idejét is.` };
-    }
-    if (endTime !== "" && endDate === "") {
-      endDate = startDate;
-    }
-    const start = `${startDate}T${startTime}`;
-    const end = endTime === "" ? "" : `${endDate}T${endTime}`;
-    // Same fixed format on both sides, so comparing the text works.
-    if (end !== "" && end <= start) {
-      return {
-        error: `A(z) ${n}. időpont befejezése a kezdése után legyen.`,
-      };
-    }
-    input.idopontok.push({ start, end, egeszNapos: false });
+  const parsed = idopontokFromForm(formData);
+  if ("error" in parsed) {
+    return parsed;
   }
+  input.idopontok = parsed.idopontok;
   if (input.idopontok.length === 0) {
     return { error: "Adj meg legalább egy időpontot." };
   }
@@ -118,10 +78,7 @@ export async function proposeEsemenyAction(
         redirect("/csoportok");
       }
       if (err.status === 422) {
-        return {
-          error:
-            "Az egyik időpont nem létezik az óraátállítás miatt (pl. március végén 02:00 és 03:00 között). Válassz másik időt.",
-        };
+        return { error: nonexistentTimeError };
       }
       if (err.status === 400 && err.code === "hatarido_not_future") {
         return { error: hataridoNotFuture };
@@ -266,16 +223,42 @@ export async function setVisszajelzesAction(
 }
 
 /**
- * Why a lifecycle change was refused, shown on the Esemény page as
- * ?hiba=<value>.
+ * Why a change to an Esemény was refused, shown on the Esemény page as
+ * ?hiba=<value>: "szervezo" (only the Szervező may), "allapot" (the
+ * Esemény's state changed meanwhile), or one of Go's specific reasons.
  */
-export type AllapotHiba = "szervezo" | "allapot";
+export type AllapotHiba =
+  | "szervezo"
+  | "allapot"
+  | "nincs_jog"
+  | "not_egyeztetes"
+  | "idopont_has_answers"
+  | "last_idopont"
+  | "masolas";
+
+/** The notice for a refusal (403 or 409) of Go, or null for another error. */
+function hibaOf(err: BackendError): AllapotHiba | null {
+  switch (err.code) {
+    case "not_permitted":
+      return "nincs_jog";
+    case "not_egyeztetes":
+    case "idopont_has_answers":
+    case "last_idopont":
+      return err.code;
+  }
+  if (err.status === 403) {
+    return "szervezo";
+  }
+  if (err.status === 409) {
+    return "allapot";
+  }
+  return null;
+}
 
 /**
- * Runs one of the Szervező's lifecycle changes, then reloads the page
- * without any earlier notice. A refusal (no longer the Szervező: 403, or
- * the Esemény already changed: 409) reloads it with a notice saying why; a
- * lost Tag goes back to the list.
+ * Runs one change to an Esemény, then reloads the page without any earlier
+ * notice. A refusal (see hibaOf) reloads it with a notice saying why; a lost
+ * Tag goes back to the list.
  */
 async function changeAllapot(
   esemenyId: string,
@@ -290,8 +273,8 @@ async function changeAllapot(
       if (err.status === 404) {
         redirect("/csoportok");
       }
-      if (err.status === 403 || err.status === 409) {
-        const hiba: AllapotHiba = err.status === 403 ? "szervezo" : "allapot";
+      const hiba = hibaOf(err);
+      if (hiba !== null) {
         revalidatePath(`/esemenyek/${esemenyId}`);
         redirect(`/esemenyek/${esemenyId}?hiba=${hiba}`);
       }
@@ -324,4 +307,134 @@ export async function cancelEsemenyAction(esemenyId: string) {
   await changeAllapot(esemenyId, (felhasznaloId) =>
     cancelEsemeny(felhasznaloId, esemenyId),
   );
+}
+
+/** Removes an Időpont during Egyeztetés (see removeIdopont for who may). */
+export async function removeIdopontAction(
+  esemenyId: string,
+  idopontId: string,
+) {
+  await changeAllapot(esemenyId, (felhasznaloId) =>
+    removeIdopont(felhasznaloId, esemenyId, idopontId),
+  );
+}
+
+/**
+ * Any Tag copies the Esemény a week later and lands on the new one. Go
+ * announces it like a newly proposed Esemény.
+ */
+export async function copyEsemenyAction(esemenyId: string) {
+  const felhasznalo = await requireFelhasznalo();
+  let newId: string;
+  try {
+    newId = (await copyEsemeny(felhasznalo.id, esemenyId)).id;
+  } catch (err) {
+    unstable_rethrow(err);
+    if (err instanceof BackendError) {
+      if (err.status === 404) {
+        redirect("/csoportok");
+      }
+      // Anything else (such as Go being down): a notice, not an error page.
+      const hiba: AllapotHiba = "masolas";
+      redirect(`/esemenyek/${esemenyId}?hiba=${hiba}`);
+    }
+    throw err;
+  }
+  redirect(`/esemenyek/${newId}`);
+}
+
+export type EditEsemenyState = { error?: string; saved?: boolean };
+
+/** The Szervező edits the title, description and Helyszín. */
+export async function editEsemenyAction(
+  esemenyId: string,
+  _previous: EditEsemenyState,
+  formData: FormData,
+): Promise<EditEsemenyState> {
+  const felhasznalo = await requireFelhasznalo();
+  const text = (name: string) => String(formData.get(name) ?? "").trim();
+  const title = text("title");
+  const helyszin = { name: text("helyszinName"), url: text("helyszinUrl") };
+  if (title === "") {
+    return { error: "Adj címet az eseménynek." };
+  }
+  if (helyszin.url !== "" && !isHttpUrl(helyszin.url)) {
+    return { error: "A térkép link teljes webcím legyen (https://…)." };
+  }
+  try {
+    await editEsemeny(felhasznalo.id, esemenyId, {
+      title,
+      description: text("description"),
+      helyszin,
+    });
+  } catch (err) {
+    unstable_rethrow(err);
+    if (err instanceof BackendError) {
+      if (err.status === 404) {
+        redirect("/csoportok");
+      }
+      revalidatePath(`/esemenyek/${esemenyId}`);
+      if (err.status === 403) {
+        return { error: "Ezt csak az esemény szervezője teheti meg." };
+      }
+      if (err.code === "esemeny_elmaradt") {
+        return { error: "Elmaradt esemény már nem szerkeszthető." };
+      }
+      if (err.status === 400) {
+        return {
+          error:
+            "Valamelyik mező hibás vagy túl hosszú. Ellenőrizd az adatokat.",
+        };
+      }
+    }
+    throw err;
+  }
+  revalidatePath(`/esemenyek/${esemenyId}`);
+  return { saved: true };
+}
+
+export type AddIdopontState = { error?: string; added?: boolean };
+
+/** Any Tag adds one Időpont during Egyeztetés. */
+export async function addIdopontAction(
+  esemenyId: string,
+  _previous: AddIdopontState,
+  formData: FormData,
+): Promise<AddIdopontState> {
+  const felhasznalo = await requireFelhasznalo();
+  const parsed = idopontokFromForm(formData);
+  if ("error" in parsed) {
+    return parsed;
+  }
+  if (parsed.idopontok.length !== 1) {
+    return { error: "Adj meg egy időpontot." };
+  }
+  try {
+    await addIdopont(felhasznalo.id, esemenyId, parsed.idopontok[0]);
+  } catch (err) {
+    unstable_rethrow(err);
+    if (err instanceof BackendError) {
+      if (err.status === 404) {
+        redirect("/csoportok");
+      }
+      if (err.status === 422) {
+        return { error: nonexistentTimeError };
+      }
+      if (err.status === 400) {
+        return { error: "Ez az időpont hibás. Ellenőrizd az adatokat." };
+      }
+      if (err.status === 409) {
+        revalidatePath(`/esemenyek/${esemenyId}`);
+        return {
+          error:
+            err.code === "too_many_idopontok"
+              ? `Egy eseménynek legfeljebb ${MAX_IDOPONTOK} időpontja lehet.`
+              : "Időpontot csak egyeztetés alatt lehet hozzáadni.",
+        };
+      }
+    }
+    throw err;
+  }
+  revalidatePath(`/esemenyek/${esemenyId}`);
+  return { added: true };
 }

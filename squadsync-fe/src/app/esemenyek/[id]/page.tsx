@@ -19,11 +19,16 @@ import {
   toLocalInputs,
   valaszLabel,
 } from "../format";
+import { MAX_IDOPONTOK } from "../limits";
+import { AddIdopont } from "./add-idopont";
 import { CancelEsemeny } from "./cancel-esemeny";
+import { CopyEsemeny } from "./copy-esemeny";
+import { EditEsemeny } from "./edit-esemeny";
 import { HataridoForm } from "./hatarido-form";
 import { kiegeszitoHibaText } from "./kiegeszitok/registry";
 import { KiegeszitokSection } from "./kiegeszitok/section";
 import { IdopontRaeresLine } from "./raeres-line";
+import { RemoveIdopont } from "./remove-idopont";
 
 export default function EsemenyPage({
   params,
@@ -45,10 +50,17 @@ const hibaText: Record<AllapotHiba, string> = {
   szervezo: "Ezt csak az esemény szervezője teheti meg.",
   allapot:
     "Ez most nem lehetséges, mert az esemény állapota közben megváltozott. Az oldal már a mostani állapotot mutatja.",
+  nincs_jog:
+    "Ezt az időpontot csak az törölheti, aki hozzáadta, vagy az esemény szervezője.",
+  not_egyeztetes: "Időpontot csak egyeztetés alatt lehet törölni.",
+  idopont_has_answers:
+    "Erre az időpontra már válaszoltak, ezért csak az esemény szervezője törölheti.",
+  last_idopont: "Az utolsó időpontot nem lehet törölni.",
+  masolas: "Az esemény másolása most nem sikerült. Próbáld újra később.",
 };
 
 function isAllapotHiba(value: unknown): value is AllapotHiba {
-  return value === "szervezo" || value === "allapot";
+  return typeof value === "string" && Object.hasOwn(hibaText, value);
 }
 
 // Reads the session and the route params, so it streams in behind Suspense.
@@ -88,6 +100,15 @@ async function Esemeny({
         <p className="text-sm text-zinc-500">
           {allapotLabel[esemeny.allapot]} · Szervező: {esemeny.szervezoName}
         </p>
+        {isSzervezo && esemeny.allapot !== "elmaradt" ? (
+          <EditEsemeny
+            esemenyId={esemeny.id}
+            title={esemeny.title}
+            description={esemeny.description}
+            helyszinName={helyszin.name}
+            helyszinUrl={helyszin.url}
+          />
+        ) : null}
         {esemeny.hatarido !== null && esemeny.allapot === "egyeztetes" ? (
           <p className="text-sm text-zinc-500">
             Szavazási határidő: {formatMoment(esemeny.hatarido)}
@@ -152,6 +173,19 @@ async function Esemeny({
             />
           ))}
         </ul>
+        {esemeny.allapot === "egyeztetes" &&
+        esemeny.idopontok.length < MAX_IDOPONTOK ? (
+          <AddIdopont esemenyId={esemeny.id} />
+        ) : null}
+      </section>
+
+      <section className="flex flex-col gap-2">
+        <CopyEsemeny esemenyId={esemeny.id} />
+        <p className="text-sm text-zinc-500">
+          Új esemény jön létre ugyanezzel a címmel, helyszínnel és bekapcsolt
+          kiegészítőkkel, az időpontok egy héttel későbbre téve. Te leszel a
+          szervezője.
+        </p>
       </section>
 
       <KiegeszitokSection
@@ -327,15 +361,25 @@ function IdopontCard({
             ))
           : null}
       </div>
-      {canConfirm ? (
-        <form
-          action={confirmIdopontAction.bind(null, esemenyId, idopont.id)}
-          className="self-start"
-        >
-          <button type="submit" className={secondaryButtonClass}>
-            Véglegesítés
-          </button>
-        </form>
+      {canConfirm || idopont.removable ? (
+        <div className="flex flex-wrap items-start gap-2">
+          {canConfirm ? (
+            <form
+              action={confirmIdopontAction.bind(null, esemenyId, idopont.id)}
+            >
+              <button type="submit" className={secondaryButtonClass}>
+                Véglegesítés
+              </button>
+            </form>
+          ) : null}
+          {idopont.removable ? (
+            <RemoveIdopont
+              esemenyId={esemenyId}
+              idopontId={idopont.id}
+              hasAnswers={idopont.visszajelzesek.length > 0}
+            />
+          ) : null}
+        </div>
       ) : null}
     </li>
   );
