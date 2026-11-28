@@ -1,7 +1,9 @@
+import type { Resztvevo } from "@/lib/backend";
 import { type AutoAllas, getAutok, type Szemely } from "@/lib/kiegeszito/autok";
 import { secondaryButtonClass } from "@/lib/ui";
 import type { KiegeszitoPanelProps } from "../panel-props";
 import {
+  addUzemanyagAction,
   claimUlesAction,
   deleteAutoAction,
   moveUtasAction,
@@ -21,7 +23,10 @@ function nameOf(s: Szemely): string {
 }
 
 /** Autók: who drives, who sits where, and who still has no seat. */
-export async function AutokPanel({ esemeny }: KiegeszitoPanelProps) {
+export async function AutokPanel({
+  esemeny,
+  felhasznaloId,
+}: KiegeszitoPanelProps) {
   const autok = await getAutok(esemeny.id);
   if (autok === null) {
     return null;
@@ -38,6 +43,15 @@ export async function AutokPanel({ esemeny }: KiegeszitoPanelProps) {
   // is véglegesítve, so the controls that only change seats show only then.
   const veglegesitve = esemeny.allapot === "veglegesitve";
   const canMove = isSzervezo && veglegesitve;
+  // The fuel shortcut records a Költségek Kiadás, only while Résztvevők exist.
+  const hasResztvevok =
+    esemeny.allapot === "veglegesitve" || esemeny.allapot === "lezajlott";
+  const koltsegekOn = esemeny.kiegeszitok.some(
+    (k) => k.kind === "koltsegek" && k.enabled,
+  );
+  const canUzemanyag =
+    hasResztvevok &&
+    esemeny.resztvevok.some((r) => r.felhasznaloId === felhasznaloId);
   const anySetup = autok.autok.length > 0 || sajatUton.length > 0;
 
   return (
@@ -73,6 +87,15 @@ export async function AutokPanel({ esemeny }: KiegeszitoPanelProps) {
               hasSeat={sajatUlesAutoId !== ""}
               mine={sajatUlesAutoId === auto.id && veglegesitve}
               canMove={canMove}
+              uzemanyag={
+                canUzemanyag
+                  ? {
+                      koltsegekOn,
+                      resztvevok: esemeny.resztvevok,
+                      felhasznaloId,
+                    }
+                  : null
+              }
             />
           ))}
         </ul>
@@ -200,6 +223,7 @@ function AutoItem({
   hasSeat,
   mine,
   canMove,
+  uzemanyag,
 }: {
   esemenyId: string;
   auto: AutoAllas;
@@ -208,6 +232,11 @@ function AutoItem({
   hasSeat: boolean;
   mine: boolean;
   canMove: boolean;
+  uzemanyag: {
+    koltsegekOn: boolean;
+    resztvevok: Resztvevo[];
+    felhasznaloId: string;
+  } | null;
 }) {
   return (
     <li className="flex flex-col gap-2 border-t border-zinc-200 pt-3 first:border-t-0 first:pt-0 dark:border-zinc-800">
@@ -272,6 +301,10 @@ function AutoItem({
         </form>
       ) : null}
 
+      {uzemanyag !== null ? (
+        <UzemanyagForm esemenyId={esemenyId} auto={auto} {...uzemanyag} />
+      ) : null}
+
       {auto.canEdit || auto.canDelete ? (
         <details className="text-sm">
           <summary className="cursor-pointer text-zinc-500">
@@ -316,5 +349,96 @@ function AutoItem({
         </details>
       ) : null}
     </li>
+  );
+}
+
+/**
+ * "⛽ Üzemanyag": a fuel Kiadás from the Autó, paid by anyone (the Sofőr by
+ * default), split among the Autó's people or every Résztvevő.
+ */
+function UzemanyagForm({
+  esemenyId,
+  auto,
+  koltsegekOn,
+  resztvevok,
+  felhasznaloId,
+}: {
+  esemenyId: string;
+  auto: AutoAllas;
+  koltsegekOn: boolean;
+  resztvevok: Resztvevo[];
+  felhasznaloId: string;
+}) {
+  const payerDefault = resztvevok.some((r) => r.felhasznaloId === auto.soforId)
+    ? auto.soforId
+    : felhasznaloId;
+  return (
+    <details className="text-sm">
+      <summary className="cursor-pointer text-zinc-500">⛽ Üzemanyag</summary>
+      {koltsegekOn ? (
+        <form
+          action={addUzemanyagAction.bind(null, esemenyId, auto.id)}
+          className="mt-2 flex flex-col gap-3"
+        >
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="flex flex-col gap-1">
+              Összeg (Ft)
+              <input
+                name="amount"
+                type="number"
+                required
+                min={1}
+                step={1}
+                className={`${inputClass} w-32`}
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              Leírás
+              <input
+                name="description"
+                maxLength={200}
+                placeholder={`Üzemanyag – ${auto.soforName} autója`}
+                className={inputClass}
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              Ki fizette
+              <select
+                name="payerId"
+                defaultValue={payerDefault}
+                className={inputClass}
+              >
+                {resztvevok.map((r) => (
+                  <option key={r.felhasznaloId} value={r.felhasznaloId}>
+                    {r.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <fieldset className="flex flex-col gap-1">
+            <legend className="mb-1">Kik között osszuk el?</legend>
+            <label className="flex items-center gap-2">
+              <input type="radio" name="split" value="auto" defaultChecked />
+              Az autó utasai ({auto.utasok.length + 1} fő)
+            </label>
+            <label className="flex items-center gap-2">
+              <input type="radio" name="split" value="mindenki" />
+              Minden résztvevő
+            </label>
+          </fieldset>
+          <div>
+            <button type="submit" className={secondaryButtonClass}>
+              Üzemanyag rögzítése
+            </button>
+          </div>
+        </form>
+      ) : (
+        <p className="mt-2 text-zinc-600 dark:text-zinc-400">
+          Az üzemanyag rögzítéséhez a Költségek kiegészítő kell. Kérd meg a
+          szervezőt, hogy kapcsolja be.
+        </p>
+      )}
+    </details>
   );
 }

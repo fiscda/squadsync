@@ -478,6 +478,22 @@ func validKiadas(in KiadasInput, editing bool) (KiadasInput, error) {
 // other bad input ErrInvalidInput. #21's fuel Kiadas comes through here
 // with the Auto's people as Split.Holders.
 func (a *App) AddKiadas(ctx context.Context, felhasznaloID, esemenyID string, in KiadasInput) (domain.Kiadas, error) {
+	var k domain.Kiadas
+	err := a.store.InTx(ctx, func(q store.Queries) error {
+		var err error
+		k, err = a.addKiadas(ctx, q, felhasznaloID, esemenyID, in)
+		return err
+	})
+	if err != nil {
+		return domain.Kiadas{}, err
+	}
+	a.kiegeszitoChanged(esemenyID)
+	return k, nil
+}
+
+// addKiadas is AddKiadas inside a transaction, so other use cases (#21's
+// fuel Kiadas) record a Kiadas under every Koltsegek rule.
+func (a *App) addKiadas(ctx context.Context, q store.Queries, felhasznaloID, esemenyID string, in KiadasInput) (domain.Kiadas, error) {
 	in, err := validKiadas(in, false)
 	if err != nil {
 		return domain.Kiadas{}, err
@@ -488,59 +504,54 @@ func (a *App) AddKiadas(ctx context.Context, felhasznaloID, esemenyID string, in
 	if in.Allapot == "" {
 		in.Allapot = domain.Kifizetve
 	}
-	var k domain.Kiadas
-	err = a.store.InTx(ctx, func(q store.Queries) error {
-		e, err := requireKiegeszitoOn(ctx, q, esemenyID, felhasznaloID, domain.Koltsegek)
-		if err != nil {
-			return err
-		}
-		if err := requireKiadasokOpen(ctx, q, e); err != nil {
-			return err
-		}
-		resztvevok, err := koltsegekResztvevok(ctx, q, e)
-		if err != nil {
-			return err
-		}
-		if !holdsResztvevo(resztvevok, domain.ClaimHolder{FelhasznaloID: felhasznaloID}) ||
-			!holdsResztvevo(resztvevok, domain.ClaimHolder{FelhasznaloID: in.PayerID}) {
-			return ErrKiadasNotResztvevo
-		}
-		reszek, egyenlo, err := resolveSplit(in.Split, in.Amount, resztvevok, nil, false)
-		if err != nil {
-			return err
-		}
-		n, err := q.CountKiadasok(ctx, e.ID)
-		if err != nil {
-			return err
-		}
-		if n >= MaxKiadasok {
-			return fmt.Errorf("%w: at most %d kiadasok", ErrInvalidInput, MaxKiadasok)
-		}
-		now := a.clock.Now()
-		k = domain.Kiadas{
-			ID:          randomID(),
-			EsemenyID:   e.ID,
-			Description: in.Description,
-			Amount:      in.Amount,
-			PayerID:     in.PayerID,
-			Allapot:     in.Allapot,
-			Egyenlo:     egyenlo,
-			CreatedBy:   felhasznaloID,
-			CreatedAt:   now,
-			UpdatedAt:   now,
-		}
-		if err := q.InsertKiadas(ctx, k); err != nil {
-			return err
-		}
-		if err := unconfirmTervezettPayer(ctx, q, e.ID, k); err != nil {
-			return err
-		}
-		return q.SetKiadasReszek(ctx, k.ID, reszek)
-	})
+	e, err := requireKiegeszitoOn(ctx, q, esemenyID, felhasznaloID, domain.Koltsegek)
 	if err != nil {
 		return domain.Kiadas{}, err
 	}
-	a.kiegeszitoChanged(esemenyID)
+	if err := requireKiadasokOpen(ctx, q, e); err != nil {
+		return domain.Kiadas{}, err
+	}
+	resztvevok, err := koltsegekResztvevok(ctx, q, e)
+	if err != nil {
+		return domain.Kiadas{}, err
+	}
+	if !holdsResztvevo(resztvevok, domain.ClaimHolder{FelhasznaloID: felhasznaloID}) ||
+		!holdsResztvevo(resztvevok, domain.ClaimHolder{FelhasznaloID: in.PayerID}) {
+		return domain.Kiadas{}, ErrKiadasNotResztvevo
+	}
+	reszek, egyenlo, err := resolveSplit(in.Split, in.Amount, resztvevok, nil, false)
+	if err != nil {
+		return domain.Kiadas{}, err
+	}
+	n, err := q.CountKiadasok(ctx, e.ID)
+	if err != nil {
+		return domain.Kiadas{}, err
+	}
+	if n >= MaxKiadasok {
+		return domain.Kiadas{}, fmt.Errorf("%w: at most %d kiadasok", ErrInvalidInput, MaxKiadasok)
+	}
+	now := a.clock.Now()
+	k := domain.Kiadas{
+		ID:          randomID(),
+		EsemenyID:   e.ID,
+		Description: in.Description,
+		Amount:      in.Amount,
+		PayerID:     in.PayerID,
+		Allapot:     in.Allapot,
+		Egyenlo:     egyenlo,
+		CreatedBy:   felhasznaloID,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if err := q.InsertKiadas(ctx, k); err != nil {
+		return domain.Kiadas{}, err
+	}
+	if err := unconfirmTervezettPayer(ctx, q, e.ID, k); err != nil {
+		return domain.Kiadas{}, err
+	}
+	if err := q.SetKiadasReszek(ctx, k.ID, reszek); err != nil {
+		return domain.Kiadas{}, err
+	}
 	return k, nil
 }
 
