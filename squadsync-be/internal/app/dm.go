@@ -124,3 +124,25 @@ func (a *App) logDiscordError(what string, err error, args ...any) {
 	}
 	a.log.Error(what, args...)
 }
+
+// sendElszamolasEmlekeztetoDM reminds the Felhasznalo, on every Discord
+// account, to confirm their Kiadasok for an Esemeny of the Csoport.
+func (a *App) sendElszamolasEmlekeztetoDM(ctx context.Context, csoportID, felhasznaloID string, e gateway.ElszamolasEmlekezteto) {
+	for _, discordID := range a.dmAccounts(ctx, csoportID, felhasznaloID) {
+		cctx, cancel := context.WithTimeout(ctx, discordCallTimeout)
+		err := a.discord.SendElszamolasEmlekeztetoDM(cctx, discordID, e)
+		cancel()
+		a.logDiscordError("send elszamolas emlekezteto dm", err, "felhasznalo", felhasznaloID, "discord_id", discordID)
+	}
+}
+
+// sendElszamolasDM sends the Felhasznalo, on every Discord account, their
+// result of the Elszamolas of an Esemeny of the Csoport.
+func (a *App) sendElszamolasDM(ctx context.Context, csoportID, felhasznaloID string, d gateway.ElszamolasDM) {
+	for _, discordID := range a.dmAccounts(ctx, csoportID, felhasznaloID) {
+		cctx, cancel := context.WithTimeout(ctx, discordCallTimeout)
+		err := a.discord.SendElszamolasDM(cctx, discordID, d)
+		cancel()
+		a.logDiscordError("send elszamolas dm", err, "felhasznalo", felhasznaloID, "discord_id", discordID, "esemeny", d.EsemenyID)
+	}
+}

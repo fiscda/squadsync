@@ -100,6 +100,10 @@ _Avoid_: Expense, bill, cost, költség (for a single item)
 The one-time calculation, after an Esemény is Lezajlott, of the fewest transfers that settle everyone's Kiadások. It runs once every Résztvevő has confirmed their Kiadások are recorded, or once the Szervező closes it without them. After that, the Kiadások are locked, unless the Szervező reopens it before any transfer is marked done.
 _Avoid_: Settlement, settle-up, balance, Törlesztés
 
+**Utalás** / **megvolt**:
+One transfer an Elszámolás calculates: one Felhasználó pays another a whole number of forints. Either of them, or the Szervező, marks it megvolt once the money has moved. When every Utalás is megvolt, the Esemény is Elszámolva.
+_Avoid_: Transfer, payment, Törlesztés
+
 **Autók** / **Autó** / **Sofőr**:
 Autók is the Kiegészítő for getting there. An Autó is a car offered by a Résztvevő, its Sofőr, with a number of free seats that other Résztvevők claim.
 _Avoid_: Car pool, ride, driver

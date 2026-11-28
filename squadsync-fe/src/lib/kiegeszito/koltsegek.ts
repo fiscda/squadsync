@@ -58,6 +58,66 @@ export type Koltsegek = {
   /** How many Kiadások are still only planned. */
   tervezett: number;
   canAdd: boolean;
+  /** null while the Esemény has no Elszámolás (no Kiadás, or not véglegesítve). */
+  elszamolas: Elszamolas | null;
+};
+
+/**
+ * Where the Elszámolás stands: lezajlas_elott (has Kiadások, not lezajlott
+ * yet), megerosites (collecting confirmations), kiszamolva (Utalások
+ * calculated), elszamolva (every Utalás megvolt).
+ */
+export type ElszamolasAllapot =
+  | "lezajlas_elott"
+  | "megerosites"
+  | "kiszamolva"
+  | "elszamolva";
+
+export type ElszamolasSzemely = {
+  felhasznaloId: string;
+  /** A name-only Vendég's id (#13), "" otherwise. */
+  vendegId: string;
+  name: string;
+};
+
+/** One transfer of a calculated Elszámolás: from pays to. */
+export type Utalas = {
+  id: string;
+  fromId: string;
+  fromName: string;
+  toId: string;
+  toName: string;
+  amount: number;
+  /** RFC 3339, UTC; null while it isn't megvolt. */
+  megvoltAt: string | null;
+  megvoltByName: string;
+  /** Whether the caller may mark it megvolt, or take that back. */
+  canMark: boolean;
+};
+
+export type Elszamolas = {
+  allapot: ElszamolasAllapot;
+  /** Résztvevők who confirmed, by name. */
+  megerositettek: ElszamolasSzemely[];
+  /** Résztvevők who haven't, by name; empty once calculated. */
+  hianyzok: ElszamolasSzemely[];
+  /** Whether the caller confirmed. */
+  megerositette: boolean;
+  /** Whether the caller may confirm now, leaving aside tervezettFizeto. */
+  canConfirm: boolean;
+  /** The planned Kiadások the caller pays, which block confirming. */
+  tervezettFizeto: string[];
+  canUnconfirm: boolean;
+  /** The Szervező may close it without the missing confirmations. */
+  canClose: boolean;
+  /** The Szervező may reopen it (no Utalás is megvolt). */
+  canReopen: boolean;
+  /** RFC 3339, UTC; null before the calculation. */
+  kiszamolvaAt: string | null;
+  /** The Szervező who closed it early, "" otherwise. */
+  lezartaName: string;
+  /** In the calculation's order. */
+  utalasok: Utalas[];
 };
 
 export type KiadasInput = {
@@ -135,5 +195,71 @@ export async function deleteKiadas(
     felhasznaloId,
     "DELETE",
     `${base(esemenyId)}/kiadas/${encodeURIComponent(kiadasId)}`,
+  );
+}
+
+function elszamolas(esemenyId: string): string {
+  return `${base(esemenyId)}/elszamolas`;
+}
+
+/** "Rögzítettem a kiadásaimat". */
+export async function confirmKiadasok(
+  felhasznaloId: string,
+  esemenyId: string,
+): Promise<void> {
+  await callBackend<void>(
+    felhasznaloId,
+    "POST",
+    `${elszamolas(esemenyId)}/megerosites`,
+  );
+}
+
+/** "Mégsem": takes the confirmation back until the calculation. */
+export async function unconfirmKiadasok(
+  felhasznaloId: string,
+  esemenyId: string,
+): Promise<void> {
+  await callBackend<void>(
+    felhasznaloId,
+    "DELETE",
+    `${elszamolas(esemenyId)}/megerosites`,
+  );
+}
+
+/** The Szervező calculating it without the missing confirmations. */
+export async function closeElszamolas(
+  felhasznaloId: string,
+  esemenyId: string,
+): Promise<void> {
+  await callBackend<void>(
+    felhasznaloId,
+    "POST",
+    `${elszamolas(esemenyId)}/lezaras`,
+  );
+}
+
+/** The Szervező reopening it, while no Utalás is megvolt. */
+export async function reopenElszamolas(
+  felhasznaloId: string,
+  esemenyId: string,
+): Promise<void> {
+  await callBackend<void>(
+    felhasznaloId,
+    "POST",
+    `${elszamolas(esemenyId)}/ujranyitas`,
+  );
+}
+
+export async function setUtalasMegvolt(
+  felhasznaloId: string,
+  esemenyId: string,
+  utalasId: string,
+  megvolt: boolean,
+): Promise<void> {
+  await callBackend<void>(
+    felhasznaloId,
+    "PUT",
+    `${elszamolas(esemenyId)}/utalas/${encodeURIComponent(utalasId)}/megvolt`,
+    { megvolt },
   );
 }

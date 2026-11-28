@@ -8,7 +8,7 @@ type KiadasAllapot string
 // The states of a Kiadas.
 const (
 	// Tervezett is a planned Kiadas: its amount is an estimate, and it
-	// doesn't count in the balances (nor, #22, in the Elszamolas).
+	// doesn't count in the balances nor in the Elszamolas.
 	Tervezett KiadasAllapot = "tervezett"
 	// Kifizetve is a paid Kiadas with its real amount.
 	Kifizetve KiadasAllapot = "kifizetve"
@@ -51,4 +51,35 @@ type KiadasResz struct {
 	// Name is the holder's name, for showing.
 	Name   string
 	Amount int
+}
+
+// Elszamolas is a calculated Elszamolas of an Esemeny: the one-time
+// calculation of the Utalasok that settle its kifizetve Kiadasok. While it
+// exists the Kiadasok are locked.
+type Elszamolas struct {
+	EsemenyID    string
+	KiszamolvaAt time.Time
+	// LezartaID is the Szervezo who closed it without every confirmation,
+	// "" when the last confirmation calculated it.
+	LezartaID string
+}
+
+// Utalas is one transfer of a calculated Elszamolas: FromID pays ToID
+// Amount whole HUF. It is megvolt once either of them (or the Szervezo)
+// marks it done.
+type Utalas struct {
+	ID        string
+	EsemenyID string
+	FromID    string
+	ToID      string
+	// FromName and ToName are filled in by reads, for showing.
+	FromName string
+	ToName   string
+	Amount   int
+	// MegvoltAt is when it was marked done, nil while it isn't.
+	MegvoltAt *time.Time
+	// MegvoltBy marked it done, "" while it isn't.
+	MegvoltBy string
+	// MegvoltByName is filled in by reads, for showing.
+	MegvoltByName string
 }

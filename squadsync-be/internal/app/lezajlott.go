@@ -57,7 +57,10 @@ func (a *App) runLezajlott(ctx context.Context, q store.Queries, j store.Job) (f
 	if err := q.UpdateEsemenyAllapot(ctx, e.ID, domain.Lezajlott, p.IdopontID); err != nil {
 		return nil, err
 	}
-	// #22 schedules the Elszamolas reminder here, 3 days after j.RunAt (when
-	// the Esemeny really ended, even if this job ran late).
+	// The Elszamolas reminder, 3 days after j.RunAt: when the Esemeny
+	// really ended, even if this job ran late.
+	if err := a.scheduleElszamolasEmlekezteto(ctx, q, e.ID, j.RunAt); err != nil {
+		return nil, err
+	}
 	return func(ctx context.Context) { a.refreshEsemenyMessages(ctx, e.ID) }, nil
 }

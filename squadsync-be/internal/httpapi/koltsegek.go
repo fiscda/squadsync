@@ -14,6 +14,11 @@ func (s *server) registerKoltsegek(mux *http.ServeMux) {
 	mux.HandleFunc("POST /esemeny/{id}/koltsegek/kiadas", withFelhasznalo(s.addKiadas))
 	mux.HandleFunc("PUT /esemeny/{id}/koltsegek/kiadas/{kiadasID}", withFelhasznalo(s.updateKiadas))
 	mux.HandleFunc("DELETE /esemeny/{id}/koltsegek/kiadas/{kiadasID}", withFelhasznalo(s.deleteKiadas))
+	mux.HandleFunc("POST /esemeny/{id}/koltsegek/elszamolas/megerosites", withFelhasznalo(s.confirmKiadasokRecorded))
+	mux.HandleFunc("DELETE /esemeny/{id}/koltsegek/elszamolas/megerosites", withFelhasznalo(s.unconfirmKiadasokRecorded))
+	mux.HandleFunc("POST /esemeny/{id}/koltsegek/elszamolas/lezaras", withFelhasznalo(s.closeElszamolas))
+	mux.HandleFunc("POST /esemeny/{id}/koltsegek/elszamolas/ujranyitas", withFelhasznalo(s.reopenElszamolas))
+	mux.HandleFunc("PUT /esemeny/{id}/koltsegek/elszamolas/utalas/{utalasID}/megvolt", withFelhasznalo(s.setUtalasMegvolt))
 }
 
 // The wire forms below are kept in sync by hand with
@@ -59,6 +64,79 @@ type koltsegekJSON struct {
 	Egyenlegek []egyenlegJSON    `json:"egyenlegek"`
 	Tervezett  int               `json:"tervezett"`
 	CanAdd     bool              `json:"canAdd"`
+	// Elszamolas is null while the Esemeny has none.
+	Elszamolas *elszamolasJSON `json:"elszamolas"`
+}
+
+type elszamolasSzemelyJSON struct {
+	FelhasznaloID string `json:"felhasznaloId"`
+	// VendegID is a name-only Vendeg's id (#13), "" otherwise.
+	VendegID string `json:"vendegId"`
+	Name     string `json:"name"`
+}
+
+type utalasJSON struct {
+	ID       string `json:"id"`
+	FromID   string `json:"fromId"`
+	FromName string `json:"fromName"`
+	ToID     string `json:"toId"`
+	ToName   string `json:"toName"`
+	Amount   int    `json:"amount"`
+	// MegvoltAt is null while it isn't megvolt.
+	MegvoltAt     *time.Time `json:"megvoltAt"`
+	MegvoltByName string     `json:"megvoltByName"`
+	CanMark       bool       `json:"canMark"`
+}
+
+type elszamolasJSON struct {
+	// Allapot is lezajlas_elott, megerosites, kiszamolva or elszamolva.
+	Allapot         string                  `json:"allapot"`
+	Megerositettek  []elszamolasSzemelyJSON `json:"megerositettek"`
+	Hianyzok        []elszamolasSzemelyJSON `json:"hianyzok"`
+	Megerositette   bool                    `json:"megerositette"`
+	CanConfirm      bool                    `json:"canConfirm"`
+	TervezettFizeto []string                `json:"tervezettFizeto"`
+	CanUnconfirm    bool                    `json:"canUnconfirm"`
+	CanClose        bool                    `json:"canClose"`
+	CanReopen       bool                    `json:"canReopen"`
+	// KiszamolvaAt is null before the calculation.
+	KiszamolvaAt *time.Time   `json:"kiszamolvaAt"`
+	LezartaName  string       `json:"lezartaName"`
+	Utalasok     []utalasJSON `json:"utalasok"`
+}
+
+func toElszamolasJSON(e *app.Elszamolas) *elszamolasJSON {
+	if e == nil {
+		return nil
+	}
+	szemelyek := func(list []app.ElszamolasSzemely) []elszamolasSzemelyJSON {
+		out := make([]elszamolasSzemelyJSON, 0, len(list))
+		for _, p := range list {
+			out = append(out, elszamolasSzemelyJSON{FelhasznaloID: p.Holder.FelhasznaloID, VendegID: p.Holder.VendegID, Name: p.Name})
+		}
+		return out
+	}
+	out := &elszamolasJSON{
+		Allapot:         string(e.Allapot),
+		Megerositettek:  szemelyek(e.Megerositettek),
+		Hianyzok:        szemelyek(e.Hianyzok),
+		Megerositette:   e.Megerositette,
+		CanConfirm:      e.CanConfirm,
+		TervezettFizeto: append([]string{}, e.TervezettFizeto...),
+		CanUnconfirm:    e.CanUnconfirm,
+		CanClose:        e.CanClose,
+		CanReopen:       e.CanReopen,
+		KiszamolvaAt:    e.KiszamolvaAt,
+		LezartaName:     e.LezartaName,
+		Utalasok:        make([]utalasJSON, 0, len(e.Utalasok)),
+	}
+	for _, u := range e.Utalasok {
+		out.Utalasok = append(out.Utalasok, utalasJSON{
+			ID: u.ID, FromID: u.FromID, FromName: u.FromName, ToID: u.ToID, ToName: u.ToName, Amount: u.Amount,
+			MegvoltAt: u.MegvoltAt, MegvoltByName: u.MegvoltByName, CanMark: u.CanMark,
+		})
+	}
+	return out
 }
 
 type kiadasInputJSON struct {
@@ -123,6 +201,7 @@ func (s *server) getKoltsegek(w http.ResponseWriter, r *http.Request, felhasznal
 		Egyenlegek: make([]egyenlegJSON, 0, len(k.Egyenlegek)),
 		Tervezett:  k.Tervezett,
 		CanAdd:     k.CanAdd,
+		Elszamolas: toElszamolasJSON(k.Elszamolas),
 	}
 	for _, kiadas := range k.Kiadasok {
 		allas := kiadasAllasJSON{kiadasJSON: toKiadasJSON(kiadas.Kiadas), Reszek: make([]kiadasReszJSON, 0, len(kiadas.Reszek)), CanEdit: kiadas.CanEdit}
@@ -174,7 +253,61 @@ func (s *server) deleteKiadas(w http.ResponseWriter, r *http.Request, felhasznal
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *server) confirmKiadasokRecorded(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
+	s.koltsegekNoContent(w, r, s.app.ConfirmKiadasokRecorded(r.Context(), felhasznaloID, r.PathValue("id")))
+}
+
+func (s *server) unconfirmKiadasokRecorded(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
+	s.koltsegekNoContent(w, r, s.app.UnconfirmKiadasokRecorded(r.Context(), felhasznaloID, r.PathValue("id")))
+}
+
+func (s *server) closeElszamolas(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
+	s.koltsegekNoContent(w, r, s.app.CloseElszamolas(r.Context(), felhasznaloID, r.PathValue("id")))
+}
+
+func (s *server) reopenElszamolas(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
+	s.koltsegekNoContent(w, r, s.app.ReopenElszamolas(r.Context(), felhasznaloID, r.PathValue("id")))
+}
+
+func (s *server) setUtalasMegvolt(w http.ResponseWriter, r *http.Request, felhasznaloID string) {
+	var body struct {
+		Megvolt bool `json:"megvolt"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	s.koltsegekNoContent(w, r, s.app.SetUtalasMegvolt(r.Context(), felhasznaloID, r.PathValue("id"), r.PathValue("utalasID"), body.Megvolt))
+}
+
+// koltsegekNoContent answers 204, or the Koltsegek error.
+func (s *server) koltsegekNoContent(w http.ResponseWriter, r *http.Request, err error) {
+	if err != nil {
+		s.writeKoltsegekError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *server) writeKoltsegekError(w http.ResponseWriter, r *http.Request, err error) {
+	for _, c := range []struct {
+		err    error
+		status int
+		code   string
+	}{
+		{app.ErrElszamolasNotOpen, http.StatusConflict, "koltsegek_elszamolas_not_open"},
+		{app.ErrElszamolasTervezett, http.StatusConflict, "koltsegek_elszamolas_tervezett"},
+		{app.ErrElszamolasNotResztvevo, http.StatusForbidden, "koltsegek_elszamolas_not_resztvevo"},
+		{app.ErrElszamolasKiszamolva, http.StatusConflict, "koltsegek_elszamolas_kiszamolva"},
+		{app.ErrElszamolasNotKiszamolva, http.StatusConflict, "koltsegek_elszamolas_not_kiszamolva"},
+		{app.ErrElszamolasMegvolt, http.StatusConflict, "koltsegek_elszamolas_megvolt"},
+		{app.ErrElszamolva, http.StatusConflict, "koltsegek_elszamolva"},
+		{app.ErrNotSzervezo, http.StatusForbidden, "koltsegek_not_szervezo"},
+	} {
+		if errors.Is(err, c.err) {
+			writeCodedError(w, c.status, err, c.code)
+			return
+		}
+	}
 	switch {
 	case errors.Is(err, app.ErrKoltsegekClosed):
 		writeCodedError(w, http.StatusConflict, err, "koltsegek_closed")

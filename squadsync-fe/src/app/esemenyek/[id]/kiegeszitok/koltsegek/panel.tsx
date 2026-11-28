@@ -11,6 +11,7 @@ import {
   markKifizetveAction,
   updateKiadasAction,
 } from "./actions";
+import { ElszamolasSection } from "./elszamolas";
 import { formatFt, formatNetto } from "./ft";
 import { KiadasForm, type KiadasFormPerson } from "./kiadas-form";
 
@@ -32,9 +33,18 @@ export async function KoltsegekPanel({
     name: r.name,
   }));
   const isResztvevo = resztvevok.some((p) => p.id === felhasznaloId);
+  const locked =
+    koltsegek.elszamolas?.allapot === "kiszamolva" ||
+    koltsegek.elszamolas?.allapot === "elszamolva";
 
   return (
     <div className="flex flex-col gap-4">
+      {koltsegek.elszamolas?.allapot === "elszamolva" ? (
+        <p className="font-medium text-green-700 dark:text-green-400">
+          Elszámolva ✓
+        </p>
+      ) : null}
+
       {kiadasok.length === 0 ? (
         <p className="text-sm text-zinc-500">Még nincs egy kiadás sem.</p>
       ) : (
@@ -51,6 +61,8 @@ export async function KoltsegekPanel({
       )}
 
       <Egyenlegek koltsegek={koltsegek} />
+
+      <ElszamolasSection esemenyId={esemeny.id} koltsegek={koltsegek} />
 
       {canAdd ? (
         <details className="rounded-xl border border-zinc-200 p-3 dark:border-zinc-800">
@@ -77,11 +89,13 @@ export async function KoltsegekPanel({
         </details>
       ) : (
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          {esemeny.allapot === "egyeztetes"
-            ? "Kiadást a véglegesítés után lehet rögzíteni."
-            : esemeny.allapot === "elmaradt"
-              ? "Elmaradt eseménynél már nem lehet kiadást rögzíteni."
-              : "Kiadást a résztvevők rögzíthetnek."}
+          {locked
+            ? "Az elszámolás elkészült, ezért a kiadások le vannak zárva."
+            : esemeny.allapot === "egyeztetes"
+              ? "Kiadást a véglegesítés után lehet rögzíteni."
+              : esemeny.allapot === "elmaradt"
+                ? "Elmaradt eseménynél már nem lehet kiadást rögzíteni."
+                : "Kiadást a résztvevők rögzíthetnek."}
         </p>
       )}
     </div>
